@@ -1,100 +1,185 @@
+# Last One Awake
 
-# BuyMe - Online Vehicle Auction Platform
+A 3D stealth game about a cat wrecking an apartment at 3 a.m. Every object is a real rigid body, every crash makes noise, noise wakes the owner, and once he's up he hunts you. Nothing about the destruction is scripted.
 
-BuyMe is a full-featured online vehicle auction system built using Flask, MySQL, SQLAlchemy, and Celery. It supports user roles (buyer, seller, admin, CSR), bidding (manual and auto), alerts, Q&A, profile change requests, and scheduled tasks.
+CS 549 — Computer Graphics & Visual Computing, Fall 2026 · Rutgers.
+Group: Rushi Patel (leader), Dharm Patel, Antara Thapliyal, Christina Ross.
 
----
-
-## 🔧 Requirements
-
-- Python 3.8+
-- MySQL Server
-- Redis (for Celery)
-- Virtualenv (recommended)
+**Live build:** _(fill in after first Vercel deploy)_
+**Mockup (previous Matter.js version):** https://lastoneawake.netlify.app/
+**Repo:** https://github.com/Antarathapliyal31/last-one-awake
 
 ---
 
-## 📦 Setup Instructions
+## For teammates: read this first
 
-### 1. Clone or Extract the Project
-Unzip the project folder and navigate to it:
+This README is the source of truth for how we build the project. If anything you were told elsewhere contradicts it, this file wins. If you need a change here, open a PR against the README itself so everyone sees the new rule.
+
+Three documents to know:
+- **This file** — what the project is, how to run it, how the code is organised, who owns what
+- **Assignment 2** (`docs/Assignment2_Last_One_Awake_v2.docx`) — the committed PRD, tech spec and MVP definition
+- **Project plan** (`docs/Project_Plan_Team_Split.pdf`) — the four-workstream split, weekly schedule, risks and contracts
+
+If you joined the team mid-week, read those two docs before writing any code.
+
+---
+
+## Pillars
+
+Three course pillars, each anchored to real work in our code:
+
+- **Physics & Dynamics.** Material table (ceramic, wood, paper, plastic, fabric, cat) drives friction, restitution, loudness, and break impulse. Solver iterations and sleep thresholds are tuned to keep a stack of five plates stable. We use `cannon-es` for integration and contact resolution.
+- **Collision Detection.** Our own uniform spatial-grid broad phase plugged into `cannon-es`. Ray-vs-AABB and ray-vs-box queries drive the owner's line-of-sight and the cat's ledge checks. A swept-sphere tunneling guard gated at 5 m/s stops fast swatted mugs from passing through thin shelves.
+- **NPC AI / Behavior Trees.** Wake-state machine (asleep → stirring → sitting up → standing → awake) driven by the noise meter. Once standing, a behavior tree investigates the last noise, searches, checks hiding spots, and returns to bed.
+
+The coupling: the solver's contact impulses are the input to the AI's perception. The two systems share one data path.
+
+---
+
+## Tech stack
+
+- **Three.js** (WebGL) for rendering, fixed isometric camera, shadow maps
+- **cannon-es** for rigid-body integration and impulse-based contact resolution
+- **Vite** for the dev build; **JavaScript ES modules**; plain HTML/CSS for the HUD
+- **Vitest** for headless unit tests of the proofs
+- **Vercel** for the live deploy (preview per PR)
+- No game engine. Rendering, the collision layer, the noise model and the AI are written by us.
+
+---
+
+## Run it locally
+
+Requires Node 18 or newer.
 
 ```bash
-cd BuyMe
+git clone https://github.com/Antarathapliyal31/last-one-awake.git
+cd last-one-awake
+npm install
+npm run dev
 ```
 
-### 2. Create Virtual Environment and Install Dependencies
+Open the URL Vite prints (usually `http://localhost:5173`).
+
+Other scripts:
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # on Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 3. Setup MySQL Database
-
-1. Create a MySQL user and database.
-2. Import the schema:
-
-```bash
-mysql -u your_user -p buyme_db < buyme_db.sql
-```
-
-3. Update `Configure.py` with your DB username/password.
-
-### 4. Run the Flask App
-
-```bash
-export FLASK_APP=website_creation.py
-export FLASK_ENV=development
-flask run
-```
-
-The site will be available at `http://127.0.0.1:5000`.
-
----
-
-## ⏰ Run Celery for Scheduled Auction Closing
-
-In a new terminal:
-
-```bash
-# Start the Celery worker
-celery -A celery_app.celery worker --loglevel=info
-```
-
-And optionally:
-
-```bash
-# Start the Celery Beat scheduler (optional if periodic auction checks are used)
-celery -A celery_app.celery beat --loglevel=info
+npm run build       # production bundle to dist/
+npm run preview     # serve the production bundle locally
+npm test            # headless tests (physics scenarios, noise curves)
+npm run test:watch  # test in watch mode
 ```
 
 ---
 
-## 👥 User Roles
+## How to play
 
-- **User**: Register, bid, buy, sell
-- **Admin**: Create CSRs, view earnings reports
-- **CSR**: Manage questions, approve profile changes, remove users/bids/auctions
+- **Up / W** — move the cat forward along the direction it is facing
+- **Down / S** — reverse
+- **Left / A** — turn left
+- **Right / D** — turn right
+- **Space** — jump
+- **Right-drag** the view — orbit camera
+- **Scroll** — zoom
+- Objects fall only when the cat physically collides with them
 
----
-
-## 🧪 Testing Checklist
-
-- [x] Register/Login/Logout
-- [x] Create auction, place bid, auto-bid
-- [x] Close auction and declare winner (via Celery)
-- [x] Alerts and notifications
-- [x] CSR and Admin dashboards
-- [x] Q&A and profile change requests
+The HUD shows FPS, active body count, the three mid-term test readouts, the wake meter, and the owner's current stage.
 
 ---
 
-## 📝 Credits
+## Code layout
 
-Developed as part of **CS 527 Database Systems** Project.
+```
+src/
+  core/        loop, event bus, tuning.js, contracts
+  physics/     world, materials, props
+  player/      cat controller, swat
+  collision/   grid broadphase, rays, tunneling guard, fracture
+  noise/       impact harvester, loudness, wake meter
+  ai/          owner state machine, behavior tree, waypoint A*
+  render/      scene, isometric camera, lights, body-to-mesh sync
+  ui/          HUD, debug overlay
+harness/       test scenarios used by both the browser page and headless tests
+tests/         Vitest suites, one per proof
+docs/          Assignment PDFs, plan, this file
+```
+
+One rule: simulation code never imports Three.js. That lets every proof run headless under Vitest as well as in the browser.
 
 ---
 
-Happy Bidding! 🚗💨
+## Workstreams and ownership
+
+Each workstream owns one folder tree and one of the mid-term proofs.
+
+| Workstream | Owner | Owns | Mid-term proof |
+|---|---|---|---|
+| **A · Collision layer** | Dharm Patel | `collision/`, raycasts, grid broadphase, swept guard, fracture (from W3) | Tunneling |
+| **B · Dynamics and cat** | Rushi Patel | `physics/`, `player/`, material table, props, stack tuning | Stacking |
+| **C · Owner AI** | Christina Ross | `ai/`, wake state machine, vision cone, behavior tree, waypoint A* | — |
+| **D · Core, noise, UI** | Antara Thapliyal | `core/`, `noise/`, `render/`, `ui/`, harness, repo and build | Coupling, Performance |
+
+**Rule of thumb:** don't edit a folder you don't own without a heads-up in the group chat and an approving review from its owner. Shared contracts (below) are the only places where one person's code touches another's; changes to those need approval from both sides.
+
+---
+
+## Contracts between workstreams
+
+These are the module boundaries. Each one has a day-one stub so nobody waits.
+
+| Contract | From → to | Shape | Day-one stub |
+|---|---|---|---|
+| `ImpactEvent` | D's harvester → noise, score, fracture | `{bodyA, bodyB, impulse, point, normal, matA, matB}`, impulse in N·s | Overlay button fires a fake impact |
+| `NoiseEvent` | D's noise → C's senses, overlay | `{position, loudness, heardLoudness}` | Fixed loudness per impact |
+| Wake level | D's meter → C's state machine, HUD | `wake` 0..1; stage thresholds in `tuning.js` | Overlay slider |
+| `raycast()` | A → B (ledge), C (sight), overlay | `raycast(origin, dir, maxDist, mask) → {hit, distance, point, normal, body}` | Wraps `cannon-es` `world.raycastClosest` |
+| Static geometry | A → broadphase, guard, C's hiding checks | Room boxes + hiding-spot volumes | Hand-placed boxes |
+| Material table | B → noise, fracture | Per material: friction, restitution, loudness, break impulse; per-pair overrides | Ceramic, wood, paper only |
+| `swat()` | B → gameplay, test scenarios | `swat(target, direction, speed)`, capped at 12 m/s | Sets velocity directly |
+| Owner state | C → HUD, round end, coupling test | `owner.state` + `stateChanged` event | Always `asleep` |
+| `debug.register()` | D → everyone | Adds a number, drawing layer, or tuning folder to the overlay | Ships by Oct 12 |
+| `Scenario` | Proof owners → D's harness | `{setup, step, metrics, pass}`; runs in browser and headless | Ships by Oct 14 |
+
+Shared conventions: units in m, kg and s · Y up · origin at floor centre · collision groups (`STATIC`, `PROP`, `DEBRIS`, `CAT`, `OWNER`) defined once in `core/`.
+
+---
+
+## Mid-term proofs
+
+Each proof has one owner. All four must pass on Chrome and Firefox by **Oct 28**, which leaves the buffer week free for tuning.
+
+| Proof | Owner | Pass criterion | Measured in |
+|---|---|---|---|
+| **Stacking** | B | Five plates, sleeping disabled, 60 s: max penetration < 2 mm, drift < 5 mm | Overlay + harness log |
+| **Tunneling** | A | 100 swats at 12 m/s into a 2 cm shelf, zero pass-throughs; failure speed logged | Harness log, headless |
+| **Coupling** | D | Same swat reaches "sitting up" from beside the bed and no further than "stirring" from the far wall | Harness log + recording |
+| **Performance** | D | 60 FPS with 60 awake bodies while the other three run | Overlay FPS |
+
+The tunneling test is a real test: at 120 Hz a 12 m/s mug moves 10 cm per step, five times the shelf's thickness, so discrete collision alone can miss it.
+
+---
+
+## Four-week schedule
+
+Kickoff weekend: **Oct 9–11**. Weeks run Monday to Sunday.
+
+| Week | Dates | Milestone |
+|---|---|---|
+| W0 | Oct 9–11 | Kickoff, stubs, first `main` merge |
+| W1 | Oct 12–18 | Walking skeleton by Oct 14: a stub swat makes noise and changes the owner's pose |
+| W2 | Oct 19–25 | Complete, playable round by **Oct 22** |
+| W3 | Oct 26 – Nov 1 | Feature complete, all four proofs pass by **Oct 28** |
+| W4 | Nov 2–5 | Tuning, demo recording, report. **Done by Nov 5.** |
+
+Could-haves (sound, difficulty, replay) only touch W4 if everything else is done.
+
+---
+
+## Working agreements
+
+- **Repo:** `main` is always runnable. Vercel deploys a preview for every PR, and `main` to production.
+- **Branches:** one per task, prefixed by workstream, e.g. `a/grid-broadphase`, `b/cat-controller`, `c/behavior-tree`, `d/noise-model`.
+
+
+---
+
+
