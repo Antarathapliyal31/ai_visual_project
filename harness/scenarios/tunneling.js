@@ -156,6 +156,7 @@ export function createTunnelingScenario(opts = {}) {
     },
 
     get world() { return world; },
+    get guard() { return guard; },
   };
   return scenario;
 }
