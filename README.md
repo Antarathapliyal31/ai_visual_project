@@ -60,7 +60,7 @@ The MVP is a single HTML file on the `antara` branch (`last-one-awake-mvp.html`)
 
 ## What's built so far by Dharm: collision layer (Workstream A, as of Oct 11)
 
-The collision layer is on the `dharm` branch in `src/collision/`. It's plain JS on top of cannon-es with no Three.js, so it runs headless. **All of Workstream A's planned tasks are implemented, and the Tunneling proof passes.** Run `npm install && npm test` to see it: 56 tests across 9 files.
+The collision layer is merged into `main` in `src/collision/`. It's plain JS on top of cannon-es with no Three.js, so it runs headless. **All of Workstream A's planned tasks are implemented, and the Tunneling proof passes.** Run `npm install && npm test` to see it: 56 tests across 9 files.
 
 **Working:**
 - **Static geometry store** (`staticGeometry.js`). The whole room as data (`STATIC_BOXES`), built once into STATIC bodies. It includes the bed-skirt `OCCLUDERS`, the `HIDING_VOLUMES` (under the bed, under the desk), the named `SURFACES` heights props spawn on, and invisible boundary walls on the cut-away sides so props can't roll off the floor.
@@ -87,14 +87,14 @@ Import everything from `src/collision/index.js`. These rules apply to people and
 4. **Install the guard and broadphase once per world.** Use `world.broadphase = new UniformGridBroadphase()` and `createSweptGuard(world)`. The guard hooks cannon's own substep events, so it works whoever drives `world.step()`. *(D)*
 5. **Use the collision helpers for sight.** Call `lineOfSight(raycast, eye, catPos, STATIC, { skip: catBody })`. Occluders (the bed skirt) block sight but bodies pass through them. For a crouch check, stand at a hiding volume's `checkFrom` with a lower eye. *(C)*
 6. **Use the owner's material table for break impulses.** Pass each break impulse to `fracture.register(body, { kind, breakImpulse })`, taking it from B's material table. Until that column exists, the defaults in `tuning.js` are used. *(B)*
-7. **Replace the stubs freely.** `package.json`, `vitest.config.js`, `src/core/tuning.js` and `src/core/groups.js` on `dharm` are minimal stubs marked `STUB (owner: D)`, added only so the collision tests run. Keep the `collision` block of `tuning.js` and the group bit values.
+7. **Replace the stubs freely.** `package.json`, `vitest.config.js`, `src/core/tuning.js` and `src/core/groups.js` are minimal stubs marked `STUB (owner: D)`, added only so the collision tests run. Keep the `collision` block of `tuning.js` and the group bit values.
 8. **The tunneling scenario needs the real `swat()`.** `harness/scenarios/tunneling.js` uses `stubSwat()`, which follows the `swat()` contract. Switch it to B's `swat()` when that lands.
 
 ### Open decision: one room layout (pending team agreement)
 
 There are currently **two different rooms**, and they need to become one:
 - **Antara's MVP (`antara` branch):** the original 12 × 12 m room, with the desk in the middle of the floor, a couch, a coffee table and a chair.
-- **`src/collision/staticGeometry.js` (`dharm` branch):** the layout from the concept art (`docs/concept/ref3d.png`). It's a 7 × 6 m cut-away room with the bed and nightstand on the west wall (inner face x = −3.5), and the desk, window sill and bookshelf on the north wall (z = −3.0).
+- **`src/collision/staticGeometry.js`:** the layout from the concept art (`docs/concept/ref3d.png`). It's a 7 × 6 m cut-away room with the bed and nightstand on the west wall (inner face x = −3.5), and the desk, window sill and bookshelf on the north wall (z = −3.0).
 
 Per the contracts table, static geometry comes from A and feeds the broadphase, the guard and C's hiding checks, so **the renderer should build furniture meshes from `STATIC_BOXES`** rather than placing its own. Otherwise the drawn room and the physical room drift apart. The proposal is to use the concept-art layout, since it's the final target and the hiding spots and the 2 cm shelf are tuned for it. Missing furniture such as the couch or coffee table would be added to the store.
 
