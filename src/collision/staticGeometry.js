@@ -52,11 +52,13 @@ export const STATIC_BOXES = [
   { id: 'wallShelf', center: [-3.35, 1.4, -1.3], half: [0.15, 0.01, 0.5], material: 'wood', role: 'solid' },
 
   // --- Desk on the north wall. Left end is a side panel, right end a drawer
-  // pedestal; the front modesty panel leaves a 30 cm gap at the floor. ---
+  // pedestal; the front modesty panel leaves a 26 cm gap at the floor, enough
+  // for the cat (B: keep its collider under 26 cm tall) and low enough that a
+  // standing owner can't see under it from across the room. ---
   { id: 'deskTop', center: [0.6, 0.9, -2.6], half: [1.2, 0.04, 0.4], material: 'wood', role: 'solid' },
   { id: 'deskSideLeft', center: [-0.57, 0.43, -2.6], half: [0.03, 0.43, 0.38], material: 'wood', role: 'solid' },
   { id: 'deskPedestal', center: [1.48, 0.43, -2.61], half: [0.28, 0.43, 0.37], material: 'wood', role: 'solid' },
-  { id: 'deskModesty', center: [0.33, 0.58, -2.22], half: [0.87, 0.28, 0.01], material: 'wood', role: 'solid' },
+  { id: 'deskModesty', center: [0.33, 0.56, -2.22], half: [0.87, 0.30, 0.01], material: 'wood', role: 'solid' },
 
   // --- Window sill and bookshelf on the north wall ---
   { id: 'windowSill', center: [2.25, 0.95, -2.925], half: [0.3, 0.02, 0.075], material: 'wood', role: 'solid' },
