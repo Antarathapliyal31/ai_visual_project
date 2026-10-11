@@ -7,7 +7,8 @@ Group: Rushi Patel (leader), Dharm Patel, Antara Thapliyal, Christina Ross.
 
 **Live build:** _(fill in after first Vercel deploy)_
 **Mockup (previous Matter.js version):** https://lastoneawake.netlify.app/
-**Repo:** https://github.com/Antarathapliyal31/last-one-awake
+**Repo:** https://github.com/Antarathapliyal31/ai_visual_project
+**Current MVP:** on the `antara` branch, single file `last-one-awake-mvp.html` (open it in a browser)
 
 ---
 
@@ -36,6 +37,38 @@ The coupling: the solver's contact impulses are the input to the AI's perception
 
 ---
 
+## What's built so far (as of Oct 11)
+
+The MVP is a single HTML file on the `antara` branch (`last-one-awake-mvp.html`). It runs end to end: cat moves, bumps things, noise feeds the wake meter, owner wakes up and catches the cat. All built in Three.js + cannon-es, no engine.
+
+**Working:**
+- 3D studio apartment: floor, walls, desk with chair, bed with headboard, nightstand with lamp and alarm clock, bookshelf with books and plant, couch with cushions, coffee table with mugs, floor lamp, window with moonlight
+- cannon-es physics at a fixed 120 Hz with substeps
+- Material system (wood, ceramic, paper, floor) with per-pair friction and restitution
+- Swattable knick-knacks that fall only when the cat bumps them
+- Cat controller: car-style WASD / arrows, Space to jump, physics body with fixed rotation
+- Noise model (D): log-scaled impulse × material loudness × distance attenuation → wake meter
+- Wake-state animation: sleeping figure stirs, sits up, stands beside the bed
+- Owner catch rule: once standing, walks via a staging waypoint toward the cat; within 0.9 m triggers "CAUGHT!" and a round-end banner
+- Tunneling guard: swept-sphere test gated at 5 m/s
+- HUD panel with FPS, bodies, pairs, physics step, three test readouts, wake bar, keys-held row
+- Three automated test buttons (stacking, tunneling, coupling) with pass/fail banners
+- Debug overlay: contact dots, toggles for debug and body sleeping, event log in bottom-left
+- Live tuning panel: 9 sliders for noise and wake parameters, saved to localStorage, Reset / Copy JSON actions
+
+**Not yet done (next week):**
+- Split the single HTML into the Vite project structure below (Rushi, W1)
+- Deploy to Vercel for a live URL
+- Awake-owner behavior tree with proper investigate / search / return behaviors (Christina)
+- Material table expanded to plastic, fabric, cat (Rushi)
+- Stacking tuning until the proof passes under 2 mm / 5 mm (Rushi)
+- Custom grid broad phase, raycast API, fracture (Dharm)
+- Chaos score, round timer, start / caught / win screens (Antara)
+- Headless Vitest harness so proofs run in CI (Antara)
+- Baked lighting polish (Christina)
+
+---
+
 ## Tech stack
 
 - **Three.js** (WebGL) for rendering, fixed isometric camera, shadow maps
@@ -52,8 +85,12 @@ The coupling: the solver's contact impulses are the input to the AI's perception
 Requires Node 18 or newer.
 
 ```bash
-git clone https://github.com/Antarathapliyal31/last-one-awake.git
-cd last-one-awake
+git clone https://github.com/Antarathapliyal31/ai_visual_project.git
+cd ai_visual_project
+# For now the project is a single HTML file on the `antara` branch:
+git checkout antara
+open last-one-awake-mvp.html   # Chrome or Firefox
+# Once the Vite project is set up on `main`:
 npm install
 npm run dev
 ```
