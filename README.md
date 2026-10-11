@@ -30,7 +30,7 @@ If you joined the team mid-week, read those two docs before writing any code.
 Three course pillars, each anchored to real work in our code:
 
 - **Physics & Dynamics.** Material table (ceramic, wood, paper, plastic, fabric, cat) drives friction, restitution, loudness, and break impulse. Solver iterations and sleep thresholds are tuned to keep a stack of five plates stable. We use `cannon-es` for integration and contact resolution.
-- **Collision Detection.** Our own uniform spatial-grid broad phase plugged into `cannon-es`. Ray-vs-AABB and ray-vs-box queries drive the owner's line-of-sight and the cat's ledge checks. A swept-sphere tunneling guard gated at 5 m/s stops fast swatted mugs from passing through thin shelves.
+- **Collision Detection.** Our own uniform spatial-grid broad phase plugged into `cannon-es`. Ray-vs-AABB and ray-vs-box queries drive the owner's line-of-sight and the cat's ledge checks. A swept-sphere tunneling guard, gated at 1 cm of motion per substep (about 1.2 m/s), stops fast swatted mugs from passing through thin shelves.
 - **NPC AI / Behavior Trees.** Wake-state machine (asleep → stirring → sitting up → standing → awake) driven by the noise meter. Once standing, a behavior tree investigates the last noise, searches, checks hiding spots, and returns to bed.
 
 The coupling: the solver's contact impulses are the input to the AI's perception. The two systems share one data path.
@@ -56,6 +56,49 @@ The MVP is a single HTML file on the `antara` branch (`last-one-awake-mvp.html`)
 - Debug overlay: contact dots, toggles for debug and body sleeping, event log in bottom-left
 - Live tuning panel: 9 sliders for noise and wake parameters, saved to localStorage, Reset / Copy JSON actions
 
+---
+
+## What's built so far by Dharm: collision layer (Workstream A, as of Oct 11)
+
+The collision layer is on the `dharm` branch in `src/collision/`. It's plain JS on top of cannon-es with no Three.js, so it runs headless. **All of Workstream A's planned tasks are implemented, and the Tunneling proof passes.** Run `npm install && npm test` to see it: 56 tests across 9 files.
+
+**Working:**
+- **Static geometry store** (`staticGeometry.js`). The whole room as data (`STATIC_BOXES`), built once into STATIC bodies. It includes the bed-skirt `OCCLUDERS`, the `HIDING_VOLUMES` (under the bed, under the desk), the named `SURFACES` heights props spawn on, and invisible boundary walls on the cut-away sides so props can't roll off the floor.
+- **Uniform grid broadphase** (`UniformGridBroadphase`). A cannon-es `Broadphase` subclass with `collisionPairs()` and `aabbQuery()`; the cell size comes from `tuning.js` (0.5 m). Across 1,000 random scenes it finds exactly the pairs the naive broadphase does. cannon's own `world.raycast*` keeps working with it.
+- **`raycast(origin, dir, maxDist, mask)`**: returns `{hit, distance, point, normal, body}`, following the contract. It uses slab and ray-vs-box tests and walks the grid. It matches `world.raycastClosest` on 10,000 random rays.
+- **Swept-sphere tunneling guard** (`createSweptGuard`). It runs after every substep and only clamps when discrete collision would actually fail, so resting stacks and sliding props are left alone.
+- **Fracture** (`createFracture`). A plate breaks into 3 wedges, a mug into 2 shells plus its base. Pieces keep the parent's velocity and spin, conserving momentum. It's driven by `ImpactEvent`s.
+- **Hiding helpers** (`hidingSpotAt`, `lineOfSight`). Hiding works through geometry, not a flag.
+- **Overlay data** (`collisionDebugData`, `registerCollisionDebug`): occupied cells, candidate, broadphase and narrow-phase pairs, guard counters.
+- **Live demo page** (`harness/collision-demo.html`): tunneling, sight and hiding, fracture, and 400-body broadphase views. Run `python3 -m http.server 8550` in the repo root and open `http://localhost:8550/harness/collision-demo.html`.
+
+**Measured results:**
+- **Tunneling, 12 m/s into the 2 cm shelf:** with the guard on, 0 of 100 swats pass through; with it off, 22 of 100 do. The failure speed is 12 m/s without the guard and above 100 m/s with it.
+- **Five-plate stack, 60 s:** the plates end in identical positions with the guard on and off, with 0 clamps.
+- **400 bodies:** while props are moving, the grid hands about 270 pairs to the narrowphase against about 1,400 for Naive, and the step drops from about 8 ms to about 5 ms. Once settled, every broadphase takes about 7–8 ms, because roughly 230 bodies never fall asleep. That's a sleep-tuning issue, not a broadphase one.
+
+### Integration rules for other workstreams (read before using `src/collision/`)
+
+Import everything from `src/collision/index.js`. These rules apply to people and AI assistants alike:
+
+1. **Fracture must flush between steps.** Feed every `ImpactEvent` to `fracture.onImpact(event)`, then call `fracture.flush()` **after `world.step()` returns**, never inside a cannon `preStep`/`postStep`/`collide` handler. cannon's post-step sleep loop crashes if a body is removed mid-step. *(D: game loop and harvester)*
+2. **Mark AABBs dirty after moving bodies by hand.** After setting a body's `position` or `quaternion` directly, set `body.aabbNeedsUpdate = true`. cannon doesn't flag it itself, and its raycasts then test a stale box. My grid always refreshes AABBs, but cannon's own code doesn't. *(B: props, cat, scenarios)*
+3. **Keep the cat short enough for the hiding spots.** The cat collider must be **under 26 cm tall** to fit under the desk's modesty panel, and under 28 cm to fit under the bed. *(B)*
+4. **Install the guard and broadphase once per world.** Use `world.broadphase = new UniformGridBroadphase()` and `createSweptGuard(world)`. The guard hooks cannon's own substep events, so it works whoever drives `world.step()`. *(D)*
+5. **Use the collision helpers for sight.** Call `lineOfSight(raycast, eye, catPos, STATIC, { skip: catBody })`. Occluders (the bed skirt) block sight but bodies pass through them. For a crouch check, stand at a hiding volume's `checkFrom` with a lower eye. *(C)*
+6. **Use the owner's material table for break impulses.** Pass each break impulse to `fracture.register(body, { kind, breakImpulse })`, taking it from B's material table. Until that column exists, the defaults in `tuning.js` are used. *(B)*
+7. **Replace the stubs freely.** `package.json`, `vitest.config.js`, `src/core/tuning.js` and `src/core/groups.js` on `dharm` are minimal stubs marked `STUB (owner: D)`, added only so the collision tests run. Keep the `collision` block of `tuning.js` and the group bit values.
+8. **The tunneling scenario needs the real `swat()`.** `harness/scenarios/tunneling.js` uses `stubSwat()`, which follows the `swat()` contract. Switch it to B's `swat()` when that lands.
+
+### Open decision: one room layout (pending team agreement)
+
+There are currently **two different rooms**, and they need to become one:
+- **Antara's MVP (`antara` branch):** the original 12 × 12 m room, with the desk in the middle of the floor, a couch, a coffee table and a chair.
+- **`src/collision/staticGeometry.js` (`dharm` branch):** the layout from the concept art (`docs/concept/ref3d.png`). It's a 7 × 6 m cut-away room with the bed and nightstand on the west wall (inner face x = −3.5), and the desk, window sill and bookshelf on the north wall (z = −3.0).
+
+Per the contracts table, static geometry comes from A and feeds the broadphase, the guard and C's hiding checks, so **the renderer should build furniture meshes from `STATIC_BOXES`** rather than placing its own. Otherwise the drawn room and the physical room drift apart. The proposal is to use the concept-art layout, since it's the final target and the hiding spots and the 2 cm shelf are tuned for it. Missing furniture such as the couch or coffee table would be added to the store.
+
+**Until this is agreed:** don't add static colliders outside `src/collision/staticGeometry.js`, and don't change that file's layout without a heads-up to Dharm. If you need furniture moved or added, raise it in the group chat.
 
 ---
 
@@ -126,6 +169,7 @@ src/
   render/      scene, isometric camera, lights, body-to-mesh sync
   ui/          HUD, debug overlay
 harness/       test scenarios used by both the browser page and headless tests
+               (collision-demo.html: live view of the collision layer)
 tests/         Vitest suites, one per proof
 docs/          Assignment PDFs, plan, this file
 ```
