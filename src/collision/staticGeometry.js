@@ -25,6 +25,7 @@ import { STATIC, ALL } from '../core/groups.js';
  * @property {number} [rotY]                    rotation about Y, radians
  * @property {string} material                  material name for B's table
  * @property {'solid'|'occluder'} role          occluders block sight but not bodies
+ * @property {boolean} [visible=true]            false: collider only, not rendered
  */
 
 // Room extents, also handy for the overlay and for scenario spawns.
@@ -36,6 +37,10 @@ export const STATIC_BOXES = [
   { id: 'floor', center: [0, -0.05, 0], half: [3.5, 0.05, 3.0], material: 'wood', role: 'solid' },
   { id: 'wallWest', center: [-3.6, 1.4, 0], half: [0.1, 1.4, 3.0], material: 'plaster', role: 'solid' },
   { id: 'wallNorth', center: [-0.1, 1.4, -3.1], half: [3.6, 1.4, 0.1], material: 'plaster', role: 'solid' },
+  // The cut-away sides have no wall to render, but props must not roll off
+  // the edge of the floor. Invisible: D's renderer skips `visible: false`.
+  { id: 'boundaryEast', center: [3.6, 1.4, 0], half: [0.1, 1.4, 3.0], material: 'plaster', role: 'solid', visible: false },
+  { id: 'boundarySouth', center: [0, 1.4, 3.1], half: [3.7, 1.4, 0.1], material: 'plaster', role: 'solid', visible: false },
 
   // --- Bed (headboard on the west wall). Platform is raised so the cat can
   // crawl underneath; the skirt below hides it. ---
