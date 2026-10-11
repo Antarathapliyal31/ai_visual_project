@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Last One Awake — MVP vertical slice</title>
+<style>
+  :root { --bg:#161320; --panel:rgba(26,22,38,.92); --ink:#f6e6cb; --muted:#b9afa3; --amber:#e8a33c; --moon:#8fb3e6; --red:#e05a3a; --green:#6ac47a; --line:#3a2f4a; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+  canvas{display:block}
+
+  .hud { position:fixed; top:14px; left:14px; width:300px; max-height:calc(100vh - 160px); overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; backdrop-filter:blur(6px); scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+  .hud::-webkit-scrollbar { width:6px; }
+  .hud::-webkit-scrollbar-thumb { background:var(--line); border-radius:3px; }
+  .hud h1 { font-size:14px; margin:0 0 2px; letter-spacing:.3px; }
+  .hud .sub { color:var(--muted); font-size:11px; margin:0 0 10px; }
+  .row { display:grid; grid-template-columns:1fr auto; row-gap:4px; column-gap:8px; font-size:12px; }
+  .row .k { color:var(--muted); }
+  .row .v { color:var(--ink); font-variant-numeric:tabular-nums; }
+  .pass { color:var(--green); } .fail { color:var(--red); } .warn { color:var(--amber); }
+
+  .section { margin-top:10px; padding-top:8px; border-top:1px solid var(--line); }
+  .section h2 { font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); margin:0 0 6px; font-weight:600; }
+
+  .wake-bar { height:10px; background:#1b1527; border:1px solid var(--line); border-radius:4px; overflow:hidden; margin-top:4px; }
+  .tune-head { display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none; }
+  .tune-head:hover { color:var(--text); }
+  .tune-head .chev { color:var(--muted); font-size:10px; transition:transform .15s; }
+  .tune-head.open .chev { transform:rotate(90deg); }
+  .tune-body { display:none; margin-top:6px; }
+  .tune-body.open { display:block; }
+  .tune-group { margin-bottom:8px; }
+  .tune-group h3 { font-size:10px; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); margin:4px 0 4px; font-weight:600; }
+  .tune-row { display:grid; grid-template-columns:1fr 70px 46px; gap:6px; align-items:center; margin-bottom:3px; font-size:11px; }
+  .tune-row label { color:var(--muted); }
+  .tune-row input[type=range] { width:100%; height:4px; -webkit-appearance:none; background:#1b1527; border:1px solid var(--line); border-radius:3px; outline:none; }
+  .tune-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:11px; height:11px; background:var(--amber); border-radius:50%; cursor:pointer; }
+  .tune-row .tv { color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
+  .tune-actions { display:flex; gap:4px; margin-top:6px; }
+  .tune-actions button { flex:1; padding:4px 6px; font-size:10px; background:transparent; color:var(--muted); border:1px solid var(--line); border-radius:4px; cursor:pointer; }
+  .tune-actions button:hover { color:var(--text); border-color:#5a4870; }
+  .wake-fill { height:100%; background:linear-gradient(90deg, var(--moon), var(--amber), var(--red)); transition:width .2s; }
+
+  .controls { position:fixed; top:14px; right:14px; width:230px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; font-size:12px; }
+  .controls button { display:block; width:100%; margin:4px 0; padding:7px 9px; background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:6px; cursor:pointer; font:inherit; text-align:left; }
+  .controls button:hover { border-color:#5a4870; }
+  .controls button.go { background:var(--amber); color:#1a1020; border-color:var(--amber); font-weight:600; text-align:center; }
+  .controls .hint { color:var(--muted); font-size:11px; margin-top:6px; line-height:1.5; }
+
+  .log { position:fixed; bottom:14px; left:14px; width:300px; max-height:120px; overflow:auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 10px; font:11px/1.4 ui-monospace,Consolas,monospace; color:var(--muted); }
+  .log .ok { color:var(--green); } .log .err { color:var(--red); } .log .info { color:var(--moon); }
+
+  .banner { position:fixed; left:50%; top:30%; transform:translateX(-50%); padding:14px 28px; background:var(--panel); border:1px solid var(--line); border-radius:10px; font-size:22px; font-weight:600; display:none; }
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <h1>Last One Awake — MVP slice</h1>
+  <p class="sub">Three.js · cannon-es · physics at 120 Hz</p>
+
+  <div class="section">
+    <h2>Performance</h2>
+    <div class="row">
+      <div class="k">FPS</div><div class="v" id="fps">—</div>
+      <div class="k">Active bodies</div><div class="v" id="bodies">—</div>
+      <div class="k">Narrow-phase pairs</div><div class="v" id="pairs">—</div>
+      <div class="k">Physics step (ms)</div><div class="v" id="pstep">—</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Stacking test (plates)</h2>
+    <div class="row">
+      <div class="k">Max penetration</div><div class="v" id="pen">—</div>
+      <div class="k">Drift from start</div><div class="v" id="drift">—</div>
+      <div class="k">Elapsed</div><div class="v" id="stackT">—</div>
+      <div class="k">Status</div><div class="v" id="stackS">idle</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Tunneling test</h2>
+    <div class="row">
+      <div class="k">Swats done</div><div class="v" id="swats">0 / 100</div>
+      <div class="k">Pass-throughs</div><div class="v" id="tunnel">0</div>
+      <div class="k">Guard velocity gate</div><div class="v" id="gate">5 m/s</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Coupling test (noise → wake)</h2>
+    <div class="row">
+      <div class="k">Wake meter</div><div class="v" id="wakeV">0.00</div>
+      <div class="k">Owner stage</div><div class="v" id="stage">asleep</div>
+      <div class="k">Last impact</div><div class="v" id="lastI">—</div>
+      <div class="k">Keys held</div><div class="v" id="keysDbg">—</div>
+    </div>
+    <div class="wake-bar"><div class="wake-fill" id="wakeFill" style="width:0%"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="tune-head" id="tuneHead">
+      <h2 style="margin:0">Tuning · D (noise &amp; wake)</h2>
+      <span class="chev">&#9654;</span>
+    </div>
+    <div class="tune-body" id="tuneBody">
+      <div class="tune-group">
+        <h3>Noise model</h3>
+        <div class="tune-row"><label>Impact floor</label><input type="range" data-k="impactFloor" min="0" max="10" step="0.1"><span class="tv" data-tv="impactFloor"></span></div>
+        <div class="tune-row"><label>Settle window (s)</label><input type="range" data-k="settleWindow" min="0" max="10" step="0.5"><span class="tv" data-tv="settleWindow"></span></div>
+        <div class="tune-row"><label>Dist attenuation</label><input type="range" data-k="distAttenuation" min="0.01" max="2" step="0.01"><span class="tv" data-tv="distAttenuation"></span></div>
+        <div class="tune-row"><label>Log divisor</label><input type="range" data-k="logDivisor" min="5" max="200" step="1"><span class="tv" data-tv="logDivisor"></span></div>
+      </div>
+      <div class="tune-group">
+        <h3>Wake meter</h3>
+        <div class="tune-row"><label>Decay (/s)</label><input type="range" data-k="wakeDecay" min="0" max="0.5" step="0.001"><span class="tv" data-tv="wakeDecay"></span></div>
+      </div>
+      <div class="tune-group">
+        <h3>Stage thresholds</h3>
+        <div class="tune-row"><label>Stirring</label><input type="range" data-k="thStirring" min="0" max="1" step="0.01"><span class="tv" data-tv="thStirring"></span></div>
+        <div class="tune-row"><label>Sitting up</label><input type="range" data-k="thSittingUp" min="0" max="1" step="0.01"><span class="tv" data-tv="thSittingUp"></span></div>
+        <div class="tune-row"><label>Standing</label><input type="range" data-k="thStanding" min="0" max="1" step="0.01"><span class="tv" data-tv="thStanding"></span></div>
+        <div class="tune-row"><label>Awake</label><input type="range" data-k="thAwake" min="0" max="1" step="0.01"><span class="tv" data-tv="thAwake"></span></div>
+      </div>
+      <div class="tune-actions">
+        <button id="tuneReset">Reset defaults</button>
+        <button id="tuneExport">Copy as JSON</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="go" id="runStack">Run stacking test (60 s)</button>
+  <button class="go" id="runTunnel">Run tunneling test (100 swats)</button>
+  <button class="go" id="runCoupling">Run coupling test</button>
+  <button id="reset">Reset scene</button>
+  <button id="togDebug">Toggle debug overlay</button>
+  <button id="togSleep">Toggle body sleeping</button>
+  <div class="hint">
+    Up/W = forward, Down/S = backward, Left/A &amp; Right/D = turn. Space to jump.
+    Hold Up + Left or Up + Right to curve. Right-drag to orbit, scroll to zoom.
+    Objects fall only when the cat bumps them.
+  </div>
+</div>
+
+<div class="log" id="log"></div>
+<div class="banner" id="banner"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
+
+// ------------------------------------------------------------
+// Logging
+// ------------------------------------------------------------
+const logEl = document.getElementById('log');
+function log(msg, cls='') { const d=document.createElement('div'); d.className=cls; d.textContent=`[${(performance.now()/1000).toFixed(1)}s] ${msg}`; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+
+// ------------------------------------------------------------
+// Three.js scene
+// ------------------------------------------------------------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x161320);
+scene.fog = new THREE.Fog(0x161320, 35, 80);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+// Isometric-ish camera: perspective at a shallow angle so we keep orbit for debugging
+const camera = new THREE.PerspectiveCamera(32, innerWidth/innerHeight, 0.1, 100);
+const orbit = { theta: Math.PI*0.25, phi: Math.PI*0.32, radius: 24, target: new THREE.Vector3(-0.5, 1.0, -0.5) };
+function updateCamera() {
+  const { theta, phi, radius, target } = orbit;
+  camera.position.set(
+    target.x + radius*Math.sin(phi)*Math.cos(theta),
+    target.y + radius*Math.cos(phi),
+    target.z + radius*Math.sin(phi)*Math.sin(theta)
+  );
+  camera.lookAt(target);
+}
+updateCamera();
+
+// Lighting: cool moonlight hemi + warm desk lamp
+scene.add(new THREE.HemisphereLight(0x9ab8dc, 0x3a3040, 0.9));
+const moon = new THREE.DirectionalLight(0xcdd9f0, 1.1);
+moon.position.set(-6, 10, 4); moon.castShadow = true;
+moon.shadow.mapSize.set(2048,2048);
+Object.assign(moon.shadow.camera, { left:-10, right:10, top:10, bottom:-10, near:1, far:30 });
+scene.add(moon);
+
+// ------------------------------------------------------------
+// Physics world (120 Hz fixed step)
+// ------------------------------------------------------------
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0,-9.82,0) });
+world.broadphase = new CANNON.SAPBroadphase(world);
+world.allowSleep = true;
+world.defaultContactMaterial.friction = 0.4;
+world.defaultContactMaterial.restitution = 0.05;
+world.solver.iterations = 20;         // high iterations help stacking
+world.solver.tolerance = 0.001;
+
+const FIXED_STEP = 1/120;
+const MAX_SUBSTEPS = 4;
+
+// materials
+const matFloor   = new CANNON.Material('floor');
+const matWood    = new CANNON.Material('wood');       // desk, furniture
+const matCeramic = new CANNON.Material('ceramic');    // plates, mugs
+const matPaper   = new CANNON.Material('paper');      // book
+world.addContactMaterial(new CANNON.ContactMaterial(matCeramic, matWood,    { friction:0.55, restitution:0.08 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matCeramic, matCeramic, { friction:0.5,  restitution:0.05 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matWood,    matFloor,   { friction:0.9,  restitution:0.0 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matPaper,   matWood,    { friction:0.7,  restitution:0.02 }));
+
+// Helper: a dynamic knick-knack. Visuals are a group; collision is a simple shape.
+// The 'light' option attaches a point light that follows the mesh (for lamps).
+function makeDynamic(x, y, z, shape, mass, meshBuilder, kind='prop', opts={}) {
+  const g = new THREE.Group();
+  meshBuilder(g);
+  const body = new CANNON.Body({
+    mass, shape, material: opts.material || matWood,
+    linearDamping: opts.linearDamping ?? 0.05,
+    angularDamping: opts.angularDamping ?? 0.1
+  });
+  body.allowSleep = true;
+  body.sleepSpeedLimit = opts.sleepSpeedLimit ?? 0.1;
+  body.sleepTimeLimit = opts.sleepTimeLimit ?? 0.5;
+  body.position.set(x, y, z);
+  g.position.copy(body.position);
+  const entry = addBody(body, g, kind);
+  if (opts.light) {
+    const l = new THREE.PointLight(opts.light.color || 0xffb060, opts.light.intensity || 0.9, opts.light.distance || 5, opts.light.decay || 2);
+    l.castShadow = true;
+    g.add(l);
+    l.position.copy(opts.light.offset || new THREE.Vector3(0, 0, 0));
+    entry.light = l;
+  }
+  return entry;
+}
+
+const brassMatM = new THREE.MeshStandardMaterial({ color:0xb08b4a, roughness:0.4, metalness:0.6 });
+const shadeMatM = new THREE.MeshStandardMaterial({ color:0xf0d9a0, roughness:0.6, emissive:0xffb060, emissiveIntensity:0.6 });
+
+
+
+// loudness factor per material pair (higher = louder for same impulse)
+const loudness = {
+  'ceramic|wood': 1.4, 'ceramic|ceramic': 1.6, 'ceramic|floor': 1.7,
+  'wood|floor': 0.9, 'paper|wood': 0.4, 'paper|floor': 0.5, 'paper|paper': 0.3,
+};
+function loudnessFor(a, b) {
+  const k1 = `${a}|${b}`, k2 = `${b}|${a}`;
+  return loudness[k1] || loudness[k2] || 1.0;
+}
+
+// ------------------------------------------------------------
+// Scene building
+// ------------------------------------------------------------
+const bodies = [];           // {body, mesh, kind, mat}
+function addBody(body, mesh, kind='prop') {
+  world.addBody(body); scene.add(mesh);
+  bodies.push({ body, mesh, kind });
+  return bodies[bodies.length-1];
+}
+
+// Desk lamp: one dynamic body, visuals inside the group so it tips over as a whole.
+// Desk top is at y=0.94; lamp body half-height is 0.3, so centre at 1.26 gives 2 cm clearance.
+makeDynamic(-2.9, 1.26, -0.4,
+  new CANNON.Cylinder(0.14, 0.14, 0.6, 10),
+  0.6,
+  (g) => {
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.05, 24), brassMatM);
+    base.position.y = -0.29; base.castShadow = true;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.5, 12), brassMatM);
+    stem.position.y = -0.03; stem.castShadow = true;
+    const shade = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.28, 24, 1, true), shadeMatM);
+    shade.position.y = 0.3; shade.castShadow = true;
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.06), new THREE.MeshBasicMaterial({ color:0xffe6b0 }));
+    bulb.position.y = 0.2;
+    g.add(base, stem, shade, bulb);
+  },
+  'lamp',
+  { light: { color:0xffb060, intensity:1.6, distance:7, decay:1.8, offset:new THREE.Vector3(0, 0.2, 0) }, linearDamping:0.3, angularDamping:0.4 }
+);
+
+// Floor: warm oak planks look + a rug under the desk for coziness
+{
+  // plank-like floor via noise-ish color
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(30,30), new THREE.MeshStandardMaterial({ color:0x7a5a3c, roughness:0.85, metalness:0.02 }));
+  g.rotation.x = -Math.PI/2; g.receiveShadow = true; scene.add(g);
+  // subtle plank lines
+  const planks = new THREE.Group();
+  for (let i=-14; i<=14; i+=2) {
+    const line = new THREE.Mesh(new THREE.BoxGeometry(30, 0.002, 0.03), new THREE.MeshBasicMaterial({ color:0x5a3f24, transparent:true, opacity:0.5 }));
+    line.position.set(0, 0.003, i); planks.add(line);
+  }
+  scene.add(planks);
+  // rug under the desk
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.0), new THREE.MeshStandardMaterial({ color:0x8a3a2a, roughness:0.95 }));
+  rug.rotation.x = -Math.PI/2; rug.position.set(-2, 0.005, 0); rug.receiveShadow = true; scene.add(rug);
+  const rugBorder = new THREE.Mesh(new THREE.RingGeometry(1.8, 2.0, 32), new THREE.MeshBasicMaterial({ color:0xc4713a, side:THREE.DoubleSide, transparent:true, opacity:0.4 }));
+  rugBorder.rotation.x = -Math.PI/2; rugBorder.position.set(-2, 0.006, 0); scene.add(rugBorder);
+
+  const b = new CANNON.Body({ mass:0, shape:new CANNON.Plane(), material:matFloor });
+  b.quaternion.setFromAxisAngle(new CANNON.Vec3(1,0,0), -Math.PI/2);
+  world.addBody(b);
+}
+
+// Walls: warm plaster with a dark baseboard
+function wall(x, z, w, d) {
+  const h = 2.8;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color:0x5a4a60, roughness:0.95 }));
+  m.position.set(x, h/2, z); m.receiveShadow = true; scene.add(m);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w*1.001, 0.14, d*1.5), new THREE.MeshStandardMaterial({ color:0x332838, roughness:0.9 }));
+  base.position.set(x, 0.07, z); base.receiveShadow = true; scene.add(base);
+  const b = new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2)), material:matWood });
+  b.position.set(x, h/2, z); world.addBody(b);
+}
+wall(-6, 0, 0.2, 12);   // back wall (left of camera)
+wall(0, -6, 12, 0.2);   // side wall (behind the bed)
+
+// Desk: warm oak slab with a trim and tapered legs
+const desk = (() => {
+  const w=2.4, h=0.9, d=1.2;
+  const woodMat = new THREE.MeshStandardMaterial({ color:0x8c5a2e, roughness:0.55, metalness:0.05 });
+  const woodDark = new THREE.MeshStandardMaterial({ color:0x5e3a1c, roughness:0.7 });
+
+  const top = new THREE.Mesh(new THREE.BoxGeometry(w, 0.07, d), woodMat);
+  top.position.set(-2, h, 0); top.castShadow = top.receiveShadow = true; scene.add(top);
+  // trim
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(w+0.04, 0.04, d+0.04), woodDark);
+  trim.position.set(-2, h-0.04, 0); trim.castShadow = trim.receiveShadow = true; scene.add(trim);
+  // apron
+  const apron = new THREE.Mesh(new THREE.BoxGeometry(w-0.3, 0.1, d-0.4), woodDark);
+  apron.position.set(-2, h-0.14, 0); apron.castShadow = apron.receiveShadow = true; scene.add(apron);
+  // tapered legs via scaled boxes
+  for (const [dx,dz] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.09, h-0.1, 0.09), woodDark);
+    l.position.set(-2 + dx*(w/2-0.12), (h-0.1)/2, dz*(d/2-0.12));
+    l.castShadow = true; scene.add(l);
+  }
+  const b = new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(w/2, 0.04, d/2)), material:matWood });
+  b.position.set(-2, h, 0); world.addBody(b);
+  return { top: top.position.clone(), size: { w, h, d } };
+})();
+
+// Shelf: thin wooden plank with two brackets (tunneling target)
+const shelf = (() => {
+  const shelfMat = new THREE.MeshStandardMaterial({ color:0x8c5a2e, roughness:0.55 });
+  const brass = new THREE.MeshStandardMaterial({ color:0x6a4320, roughness:0.6 });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.02, 0.6), shelfMat);
+  m.position.set(2.2, 1.4, 0); m.castShadow = m.receiveShadow = true; scene.add(m);
+  for (const dx of [-0.7, 0.7]) {
+    const br = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.3, 0.5), brass);
+    br.position.set(2.2 + dx, 1.25, 0); br.castShadow = true; scene.add(br);
+  }
+  const b = new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(1.0, 0.01, 0.3)), material:matWood });
+  b.position.copy(m.position); world.addBody(b);
+  return { mesh: m, body: b, aabb: { min:{x:1.2,y:1.39,z:-0.3}, max:{x:3.2,y:1.41,z:0.3} } };
+})();
+
+// Bed: wooden frame, mattress, blanket, pillow, person tucked in
+const bed = (() => {
+  const frameMat = new THREE.MeshStandardMaterial({ color:0x5e3a1c, roughness:0.6 });
+  const mattressMat = new THREE.MeshStandardMaterial({ color:0xf0e8d0, roughness:0.9 });
+  const blanketMat = new THREE.MeshStandardMaterial({ color:0x8a3a4a, roughness:0.95 });
+  const pillowMat = new THREE.MeshStandardMaterial({ color:0xfbf5e4, roughness:0.95 });
+  const skinMat = new THREE.MeshStandardMaterial({ color:0xd9b48a, roughness:0.6 });
+
+  // frame (king-ish)
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.3, 1.5), frameMat);
+  frame.position.set(3.0, 0.15, -3.4); frame.castShadow = frame.receiveShadow = true; scene.add(frame);
+  // headboard
+  const hb = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.1, 0.1), frameMat);
+  hb.position.set(3.0, 0.7, -4.1); hb.castShadow = true; scene.add(hb);
+  // mattress
+  const mattress = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.22, 1.4), mattressMat);
+  mattress.position.set(3.0, 0.41, -3.4); mattress.castShadow = mattress.receiveShadow = true; scene.add(mattress);
+  // blanket covering the lower 2/3
+  const blanket = new THREE.Mesh(new THREE.BoxGeometry(2.52, 0.1, 0.95), blanketMat);
+  blanket.position.set(3.0, 0.56, -3.2); blanket.castShadow = blanket.receiveShadow = true; scene.add(blanket);
+  // Mattress top is at y=0.52 (centre 0.41 + half-height 0.11). Pillow half-height is 0.06;
+  // centre at 0.6 gives 1 cm clearance.
+  for (const dx of [-0.6, 0.6]) {
+    makeDynamic(3.0 + dx, 0.6, -3.85,
+      new CANNON.Box(new CANNON.Vec3(0.55, 0.06, 0.21)),
+      0.2,
+      (g) => {
+        const pillow = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.12, 0.42), pillowMat);
+        pillow.castShadow = true; g.add(pillow);
+      },
+      'pillow',
+      { linearDamping:0.4, angularDamping:0.5 }
+    );
+  }
+  const hairMat = new THREE.MeshStandardMaterial({ color:0x3a2a1c, roughness:0.9 });
+  const pyjamaMat = new THREE.MeshStandardMaterial({ color:0x5a6a8a, roughness:0.95 });
+  const trouserMat = new THREE.MeshStandardMaterial({ color:0x3a4055, roughness:0.9 });
+
+  // --- Sleeping figure under the covers ---
+  // Head on the pillow + visible shoulder peeking out from the blanket.
+  // The blanket already covers the body; we add a shoulder bump and arm so it reads human.
+  const sleeper = new THREE.Group();
+  const sHead = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 18), skinMat);
+  sHead.scale.set(1, 1.05, 1.1);
+  sHead.castShadow = true;
+  const sHair = new THREE.Mesh(new THREE.SphereGeometry(0.17, 24, 18, 0, Math.PI*2, 0, Math.PI/1.6), hairMat);
+  sHair.position.y = 0.02; sHair.rotation.x = -0.25; sHair.castShadow = true;
+  const sEar = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), skinMat);
+  sEar.position.set(0, -0.02, 0.15);
+  // shoulder bump + arm resting on top of blanket
+  const sShoulder = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 12), pyjamaMat);
+  sShoulder.position.set(0, -0.22, 0.25); sShoulder.castShadow = true;
+  const sArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.35, 6, 10), pyjamaMat);
+  sArm.rotation.z = Math.PI/2.3; sArm.rotation.y = -0.2;
+  sArm.position.set(-0.2, -0.28, 0.3); sArm.castShadow = true;
+  sleeper.add(sHead, sHair, sEar, sShoulder, sArm);
+  // sleeper lies on his side facing the camera: pillow is at the headboard end (z=-3.85).
+  sleeper.position.set(3.0, 0.74, -3.78);
+  sleeper.rotation.y = Math.PI;  // face away from the headboard
+  scene.add(sleeper);
+
+  // Body lump under blanket (torso + hips) — stays visible when sleeping
+  const lump = new THREE.Group();
+  const torsoLump = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.5, 8, 14), blanketMat);
+  torsoLump.rotation.z = Math.PI/2; torsoLump.position.y = 0.08; torsoLump.castShadow = true;
+  const feetLump = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), blanketMat);
+  feetLump.position.set(0, 0.08, 0.75); feetLump.scale.set(1, 0.7, 1); feetLump.castShadow = true;
+  lump.add(torsoLump, feetLump);
+  lump.position.set(3.0, 0.6, -3.0);  // extends from the pillow down toward the foot of the bed
+  scene.add(lump);
+
+  // --- Standing figure (hidden until wake >= standing) ---
+  // Full human silhouette: head, hair, torso, two arms, two legs, feet.
+  const standing = new THREE.Group();
+  const stHead = new THREE.Mesh(new THREE.SphereGeometry(0.14, 24, 18), skinMat);
+  stHead.scale.set(1, 1.1, 1); stHead.position.y = 1.65; stHead.castShadow = true;
+  const stHair = new THREE.Mesh(new THREE.SphereGeometry(0.145, 24, 18, 0, Math.PI*2, 0, Math.PI/1.6), hairMat);
+  stHair.position.y = 1.68; stHair.castShadow = true;
+  const stNeck = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.08, 12), skinMat);
+  stNeck.position.y = 1.5; stNeck.castShadow = true;
+  const stTorso = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.5, 8, 14), pyjamaMat);
+  stTorso.position.y = 1.18; stTorso.castShadow = true;
+  // arms (slightly out from the body so they read)
+  for (const dx of [-1, 1]) {
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), pyjamaMat);
+    shoulder.position.set(dx*0.21, 1.35, 0); shoulder.castShadow = true;
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.42, 6, 10), pyjamaMat);
+    arm.position.set(dx*0.26, 1.07, 0); arm.rotation.z = dx*0.08; arm.castShadow = true;
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), skinMat);
+    hand.position.set(dx*0.3, 0.82, 0.02); hand.castShadow = true;
+    standing.add(shoulder, arm, hand);
+  }
+  // legs
+  for (const dx of [-1, 1]) {
+    const hip = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), trouserMat);
+    hip.position.set(dx*0.1, 0.85, 0); hip.castShadow = true;
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.55, 6, 10), trouserMat);
+    leg.position.set(dx*0.1, 0.5, 0); leg.castShadow = true;
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.07, 0.2), new THREE.MeshStandardMaterial({ color:0x2a1a14, roughness:0.6 }));
+    foot.position.set(dx*0.1, 0.18, 0.04); foot.castShadow = true;
+    standing.add(hip, leg, foot);
+  }
+  standing.add(stHead, stHair, stNeck, stTorso);
+  // Place him standing on the floor beside the bed, facing the room
+  standing.position.set(3.0, 0.07, -2.1);
+  standing.rotation.y = -Math.PI/2;  // face toward the desk (center of chaos)
+  standing.visible = false;
+  scene.add(standing);
+  return { pos: new THREE.Vector3(3.0, 0.72, -3.4), headGroup: sleeper, lump, standing };
+})();
+
+let plates = [], mugs = [], book = null;
+
+// ============================================================
+// Studio apartment props: fills the room with a lived-in feel
+// All static (mass 0) unless noted.
+// ============================================================
+const woodDarkMat = new THREE.MeshStandardMaterial({ color:0x5e3a1c, roughness:0.6 });
+const woodWarmMat = new THREE.MeshStandardMaterial({ color:0x8c5a2e, roughness:0.55, metalness:0.05 });
+const fabricTerra = new THREE.MeshStandardMaterial({ color:0x8a3a2a, roughness:0.95 });
+const brassMat = new THREE.MeshStandardMaterial({ color:0xb08b4a, roughness:0.4, metalness:0.6 });
+
+function staticBox(x,y,z,w,h,d,mat) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z); m.castShadow = m.receiveShadow = true; scene.add(m);
+  const b = new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(w/2,h/2,d/2)), material:matWood });
+  b.position.set(x,y,z); world.addBody(b);
+  return m;
+}
+
+// --- Nightstand next to the bed with a tiny lamp and alarm clock ---
+staticBox(1.3, 0.3, -3.9, 0.5, 0.6, 0.45, woodDarkMat);
+// Nightstand top is at y=0.6 (centre 0.3 + half-height 0.3). Lamp half-height
+// is 0.125, so centre at 0.74 gives 1.5 cm clearance.
+makeDynamic(1.3, 0.74, -3.9,
+  new CANNON.Cylinder(0.1, 0.1, 0.25, 10),
+  0.3,
+  (g) => {
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.03, 20), brassMatM);
+    base.position.y = -0.11; base.castShadow = true;
+    const shade = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.18, 20, 1, true), shadeMatM);
+    shade.position.y = 0.08; shade.castShadow = true;
+    g.add(base, shade);
+  },
+  'lamp',
+  { light: { color:0xffb060, intensity:0.6, distance:3.5, decay:2.0, offset:new THREE.Vector3(0, 0.08, 0) }, linearDamping:0.3 }
+);
+// Alarm clock sits beside the lamp. Nightstand top at y=0.6; clock half-height 0.05.
+makeDynamic(1.5, 0.66, -3.75,
+  new CANNON.Box(new CANNON.Vec3(0.09, 0.05, 0.04)),
+  0.4,
+  (g) => {
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.1, 0.08), new THREE.MeshStandardMaterial({ color:0x1a1a1a, roughness:0.4 }));
+    c.castShadow = true;
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.06), new THREE.MeshStandardMaterial({ color:0x2a0a0a, emissive:0xff4040, emissiveIntensity:0.9 }));
+    face.position.z = 0.045;
+    g.add(c, face);
+  },
+  'clock'
+);
+
+// --- Window on the back wall (above the bed) with a moonbeam ---
+{
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.06), woodDarkMat);
+  frame.position.set(-1.5, 1.9, -5.92); scene.add(frame);
+  const pane = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.84), new THREE.MeshStandardMaterial({ color:0x24344a, emissive:0x5a7cae, emissiveIntensity:0.35, roughness:0.1 }));
+  pane.position.set(-1.5, 1.9, -5.89); scene.add(pane);
+  // muntins
+  const m1 = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.03, 0.07), woodDarkMat); m1.position.set(-1.5, 1.9, -5.88); scene.add(m1);
+  const m2 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.84, 0.07), woodDarkMat); m2.position.set(-1.5, 1.9, -5.88); scene.add(m2);
+  // sill
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.08, 0.2), woodWarmMat);
+  sill.position.set(-1.5, 1.38, -5.84); sill.castShadow = true; scene.add(sill);
+}
+
+// --- Bookshelf against the left wall behind the desk ---
+{
+  const shelfMat = woodDarkMat;
+  // Build the bookshelf as hollow: back + two sides + top + bottom, so the shelves
+  // inside are the only surfaces the books rest on. If the outer were solid, each
+  // panel collider would overlap it and books would spawn inside static geometry.
+  const panelDark = new THREE.MeshStandardMaterial({ color:0x3a2410, roughness:0.7 });
+  // back
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.2, 0.04), shelfMat);
+  back.position.set(-5.7, 1.1, -2.37); back.castShadow = back.receiveShadow = true; scene.add(back);
+  world.addBody(new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(0.5, 1.1, 0.02)), material:matWood, position:new CANNON.Vec3(-5.7, 1.1, -2.37) }));
+  // left and right side walls
+  for (const dx of [-0.48, 0.48]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(0.04, 2.2, 0.35), shelfMat);
+    side.position.set(-5.7 + dx, 1.1, -2.2); side.castShadow = side.receiveShadow = true; scene.add(side);
+    world.addBody(new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(0.02, 1.1, 0.175)), material:matWood, position:new CANNON.Vec3(-5.7 + dx, 1.1, -2.2) }));
+  }
+  // top cap
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.04, 0.35), shelfMat);
+  top.position.set(-5.7, 2.2, -2.2); top.castShadow = top.receiveShadow = true; scene.add(top);
+  world.addBody(new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(0.5, 0.02, 0.175)), material:matWood, position:new CANNON.Vec3(-5.7, 2.2, -2.2) }));
+  // inner shelf panels (both visual and collider), books rest on these
+  for (let i=0; i<4; i++) {
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.03, 0.33), panelDark);
+    panel.position.set(-5.7, 0.2 + i*0.55, -2.2); panel.castShadow = panel.receiveShadow = true; scene.add(panel);
+    world.addBody(new CANNON.Body({ mass:0, shape:new CANNON.Box(new CANNON.Vec3(0.46, 0.015, 0.165)), material:matWood, position:new CANNON.Vec3(-5.7, 0.2 + i*0.55, -2.2) }));
+  }
+  // books on each shelf (dynamic)
+  const bColors = [0x6a3a3a, 0x3a5a4a, 0x4a3a6a, 0x6a4a2a, 0x4a2a3a, 0x2a4a4a, 0x7a5a2a];
+  for (let s=0; s<4; s++) {
+    for (let i=0; i<6; i++) {
+      const bw = 0.08 + Math.random()*0.03, bh = 0.3 + Math.random()*0.08, bd = 0.22;
+      const col = bColors[(i+s)%bColors.length];
+      // Panel top at y = 0.2 + s*0.55 + 0.015. Book half-height bh/2. Spawn with 1 cm clearance.
+      makeDynamic(
+        -5.7 + (-0.38 + i*0.13 + Math.random()*0.01),
+        0.2 + s*0.55 + 0.015 + bh/2 + 0.01,
+        -2.2,
+        new CANNON.Box(new CANNON.Vec3(bw/2, bh/2, bd/2)),
+        0.3,
+        (g) => {
+          const bk = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), new THREE.MeshStandardMaterial({ color: col, roughness:0.7 }));
+          bk.castShadow = true; g.add(bk);
+        },
+        'book-shelf',
+        { material: matPaper, linearDamping:0.6, angularDamping:0.8 }
+      );
+    }
+  }
+  // Plant sits on the shelf top (y=2.22). Pot+leaves half-height 0.15; centre at 2.38.
+  makeDynamic(-5.7, 2.38, -2.2,
+    new CANNON.Cylinder(0.09, 0.09, 0.3, 10),
+    0.5,
+    (g) => {
+      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.14, 16), new THREE.MeshStandardMaterial({ color:0x9a5a3a, roughness:0.8 }));
+      pot.position.y = -0.08; pot.castShadow = true;
+      const leaves = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), new THREE.MeshStandardMaterial({ color:0x3a6a3a, roughness:0.95 }));
+      leaves.position.y = 0.08; leaves.scale.set(1, 0.9, 1); leaves.castShadow = true;
+      g.add(pot, leaves);
+    },
+    'plant'
+  );
+}
+
+// --- Chair tucked under the desk ---
+{
+  const seat = staticBox(-2.0, 0.5, 1.0, 0.5, 0.05, 0.5, woodDarkMat);
+  // back
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.05), woodDarkMat);
+  back.position.set(-2.0, 0.82, 1.22); back.castShadow = true; scene.add(back);
+  // legs
+  for (const [dx, dz] of [[-0.22,-0.22],[0.22,-0.22],[-0.22,0.22],[0.22,0.22]]) {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 0.05), woodDarkMat);
+    l.position.set(-2.0 + dx, 0.25, 1.0 + dz); l.castShadow = true; scene.add(l);
+  }
+}
+
+// --- Couch along the right wall (across from the desk) ---
+{
+  const couchMat = new THREE.MeshStandardMaterial({ color:0x4a5a7a, roughness:0.95 });
+  const base = staticBox(0.5, 0.3, 3.5, 2.6, 0.4, 0.9, couchMat);
+  // back cushion
+  const bc = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.6, 0.2), couchMat);
+  bc.position.set(0.5, 0.8, 3.85); bc.castShadow = bc.receiveShadow = true; scene.add(bc);
+  // seat cushions
+  for (const dx of [-0.85, 0, 0.85]) {
+    const cu = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.12, 0.75), new THREE.MeshStandardMaterial({ color:0x5a6a8a, roughness:0.95 }));
+    cu.position.set(0.5 + dx, 0.56, 3.4); cu.castShadow = cu.receiveShadow = true; scene.add(cu);
+  }
+  // throw pillow
+  const tp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.3), new THREE.MeshStandardMaterial({ color:0x8a3a4a, roughness:0.95 }));
+  tp.position.set(1.1, 0.75, 3.6); tp.rotation.y = 0.3; tp.castShadow = true; scene.add(tp);
+  // armrests
+  for (const dx of [-1.4, 1.4]) {
+    const ar = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.5, 0.9), couchMat);
+    ar.position.set(0.5 + dx, 0.65, 3.5); ar.castShadow = true; scene.add(ar);
+  }
+}
+
+// --- Coffee table in front of the couch, with two mugs on it for the cat ---
+{
+  const top = staticBox(0.5, 0.42, 2.1, 1.3, 0.06, 0.7, woodWarmMat);
+  for (const [dx, dz] of [[-0.55,-0.3],[0.55,-0.3],[-0.55,0.3],[0.55,0.3]]) {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.4, 0.06), woodDarkMat);
+    l.position.set(0.5 + dx, 0.22, 2.1 + dz); l.castShadow = true; scene.add(l);
+  }
+}
+// extra mugs sitting on the coffee table (dynamic — cat targets!)
+mugs.push(makeMug(0.2, 2.0, 0.53));
+mugs.push(makeMug(0.9, 2.2, 0.53));
+
+// Framed photo on top of the headboard. Headboard top at y=1.25; frame half-height 0.2;
+// centre at 1.46 gives 1 cm clearance.
+makeDynamic(3.0, 1.46, -4.05,
+  new CANNON.Box(new CANNON.Vec3(0.3, 0.2, 0.03)),
+  0.35,
+  (g) => {
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.05), woodDarkMat);
+    frame.castShadow = true;
+    const img = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.3), new THREE.MeshStandardMaterial({ color:0x6a8aaa, roughness:0.8 }));
+    img.position.z = 0.026;
+    g.add(frame, img);
+  },
+  'photo'
+);
+
+// --- Rug under the couch (living zone) ---
+{
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.0), new THREE.MeshStandardMaterial({ color:0x3a4a6a, roughness:0.95 }));
+  rug.rotation.x = -Math.PI/2; rug.position.set(0.5, 0.007, 2.6); rug.receiveShadow = true; scene.add(rug);
+  const trim = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.4, 32), new THREE.MeshBasicMaterial({ color:0x6a7aa0, side:THREE.DoubleSide, transparent:true, opacity:0.35 }));
+  trim.rotation.x = -Math.PI/2; trim.position.set(0.5, 0.008, 2.6); scene.add(trim);
+}
+
+// --- Floor lamp in the corner near the couch ---
+{
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 0.04, 20), brassMat);
+  base.position.set(2.8, 0.02, 4.5); base.castShadow = true; scene.add(base);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.6, 12), brassMat);
+  stem.position.set(2.8, 0.84, 4.5); scene.add(stem);
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.4, 24, 1, true), new THREE.MeshStandardMaterial({ color:0xf0d9a0, roughness:0.6, emissive:0xffb060, emissiveIntensity:0.5 }));
+  shade.position.set(2.8, 1.82, 4.5); scene.add(shade);
+  const fl = new THREE.PointLight(0xffb060, 0.9, 6, 1.8); fl.position.set(2.8, 1.75, 4.5); fl.castShadow = true; scene.add(fl);
+}
+
+// Cat food and water bowls. Floor at y=0; bowl half-height 0.025; centre at 0.04 gives 1.5 cm clearance.
+makeDynamic(-5.3, 0.04, 4.8,
+  new CANNON.Cylinder(0.1, 0.1, 0.05, 10),
+  0.4,
+  (g) => {
+    const bowl = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.025, 10, 24), new THREE.MeshStandardMaterial({ color:0x6a4a3a, roughness:0.5 }));
+    bowl.rotation.x = Math.PI/2; bowl.castShadow = true;
+    const food = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.015, 20), new THREE.MeshStandardMaterial({ color:0x8a5a2a }));
+    g.add(bowl, food);
+  },
+  'bowl',
+  { material: matCeramic }
+);
+makeDynamic(-4.9, 0.04, 4.8,
+  new CANNON.Cylinder(0.1, 0.1, 0.05, 10),
+  0.4,
+  (g) => {
+    const bowl2 = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.025, 10, 24), new THREE.MeshStandardMaterial({ color:0x4a6a8a, roughness:0.4 }));
+    bowl2.rotation.x = Math.PI/2; bowl2.castShadow = true;
+    const water = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.012, 20), new THREE.MeshStandardMaterial({ color:0x3a5a7a, metalness:0.3, roughness:0.1 }));
+    g.add(bowl2, water);
+  },
+  'bowl',
+  { material: matCeramic }
+);
+
+// Cat: tabby with body, head, ears, legs, tail
+const cat = (() => {
+  const g = new THREE.Group();
+  const fur = new THREE.MeshStandardMaterial({ color:0x3a2f26, roughness:0.9 });
+  const belly = new THREE.MeshStandardMaterial({ color:0x6a584a, roughness:0.9 });
+  const pink = new THREE.MeshStandardMaterial({ color:0xe6a3a3, roughness:0.6 });
+  // body
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.3, 10, 16), fur);
+  body.rotation.z = Math.PI/2; body.position.y = 0.12; body.castShadow = true;
+  // belly
+  const bel = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.28, 10, 16), belly);
+  bel.rotation.z = Math.PI/2; bel.position.set(0, 0.06, 0); bel.castShadow = true;
+  // head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 16), fur);
+  head.position.set(0.26, 0.18, 0); head.castShadow = true;
+  // ears
+  for (const dz of [-0.055, 0.055]) {
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.08, 10), fur);
+    ear.position.set(0.26, 0.28, dz); ear.castShadow = true; g.add(ear);
+    const inner = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.05, 8), pink);
+    inner.position.set(0.268, 0.275, dz); g.add(inner);
+  }
+  // snout
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), belly);
+  snout.position.set(0.35, 0.16, 0); snout.scale.set(1, 0.8, 1.1); g.add(snout);
+  // eyes
+  for (const dz of [-0.05, 0.05]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 8), new THREE.MeshStandardMaterial({ color:0x1a3a1a, emissive:0x4acc5a, emissiveIntensity:0.5 }));
+    eye.position.set(0.335, 0.21, dz); g.add(eye);
+  }
+  // legs
+  for (const [dx, dz] of [[-0.1, -0.07],[-0.1, 0.07],[0.1, -0.07],[0.1, 0.07]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.12, 10), fur);
+    leg.position.set(dx, 0.06, dz); leg.castShadow = true; g.add(leg);
+  }
+  // tail (curled up)
+  const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.015, 0.35, 10), fur);
+  tail.position.set(-0.18, 0.2, 0); tail.rotation.z = -0.9; tail.castShadow = true;
+  g.add(body, bel, head, tail);
+  g.position.set(-0.8, 0.25, 1.5);  // on the floor, between desk and couch
+  scene.add(g);
+  return g;
+})();
+
+// ============================================================
+// Cat physics body + controller (arrow keys / WASD, space to jump)
+// ============================================================
+const catBody = new CANNON.Body({
+  mass: 2.0,
+  shape: new CANNON.Sphere(0.22),
+  material: matWood,
+  linearDamping: 0.4,       // lower so velocity sticks between frames
+  angularDamping: 0.95,
+  fixedRotation: true,
+  allowSleep: false,        // never let the cat sleep; setting velocity on a sleeping body is a no-op
+});
+catBody.position.set(-0.8, 0.25, 1.5);
+catBody.updateMassProperties();
+world.addBody(catBody);
+
+const catKeys = {};
+const CAT_KEY_NAMES = new Set(['arrowup','arrowdown','arrowleft','arrowright','w','a','s','d',' ','space']);
+// Use window + capture so focused buttons/inputs can't swallow the event.
+// preventDefault on arrow keys stops the page from scrolling.
+let firstKeyLogged = false;
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (!CAT_KEY_NAMES.has(k)) return;
+  catKeys[k] = true;
+  if (!firstKeyLogged) { firstKeyLogged = true; log(`first key received: "${k}" — controller alive`, 'ok'); }
+  if (e.code === 'Space' && catBody.velocity.y < 0.5 && catBody.position.y < 1.3) {
+    catBody.velocity.y = 4.8;
+  }
+  e.preventDefault();
+}, true);
+window.addEventListener('keyup', e => {
+  const k = e.key.toLowerCase();
+  if (!CAT_KEY_NAMES.has(k)) return;
+  catKeys[k] = false;
+  e.preventDefault();
+}, true);
+// Clicking any button in the UI steals focus; re-blur so arrow keys reach us.
+document.querySelectorAll('button').forEach(b => b.addEventListener('click', () => b.blur()));
+// Make the canvas focusable and give it focus on load so the first key press works.
+renderer.domElement.tabIndex = 0;
+renderer.domElement.focus();
+
+// Car-style controls: Left/Right rotate the cat, Up/Down drive it forward/back
+// along the direction it's currently facing. You can hold Up+Right to curve forward.
+const CAT_SPEED = 3.4;
+const CAT_TURN = 2.6;   // radians/sec
+let catHeading = 0;     // radians; 0 means facing +x direction
+function updateCat(dt) {
+  // Turning
+  if (catKeys['arrowleft']  || catKeys['a']) catHeading += CAT_TURN * dt;
+  if (catKeys['arrowright'] || catKeys['d']) catHeading -= CAT_TURN * dt;
+
+  // Forward/back along current heading
+  let drive = 0;
+  if (catKeys['arrowup']   || catKeys['w']) drive += 1;
+  if (catKeys['arrowdown'] || catKeys['s']) drive -= 0.6;
+  if (drive !== 0) {
+    // Wake the body up: setting velocity directly on a sleeping body in cannon-es is a no-op
+    if (catBody.sleepState === CANNON.Body.SLEEPING) catBody.wakeUp();
+    const vx = Math.cos(catHeading) * CAT_SPEED * drive;
+    const vz = -Math.sin(catHeading) * CAT_SPEED * drive;
+    catBody.velocity.x = vx;
+    catBody.velocity.z = vz;
+  } else {
+    // let friction stop it rather than sliding forever
+    catBody.velocity.x *= 0.85;
+    catBody.velocity.z *= 0.85;
+  }
+
+  // Visual: snap mesh to body, apply heading rotation
+  cat.position.set(catBody.position.x, catBody.position.y - 0.22, catBody.position.z);
+  cat.rotation.y = catHeading;
+}
+
+// ============================================================
+// Owner search behavior: once standing (wake >= 0.7), the owner walks
+// toward the cat; if he gets within catch radius, round over.
+// ============================================================
+let ownerState = 'asleep';
+// Owner spawns tight against the bed on its "open side" (toward the room center).
+// Bed center is (3, _, -3.4) with half-length 0.75 in z, so the foot is at z=-2.65.
+// Starting at (3.0, 0.07, -2.3) puts him just past the foot, in the walking area.
+const OWNER_SPAWN = new THREE.Vector3(3.0, 0.07, -2.3);
+// Staging waypoint: clear of the bed, next to the coffee table / open floor
+const OWNER_STAGING = new THREE.Vector3(2.3, 0.07, -1.0);
+let ownerPos = OWNER_SPAWN.clone();
+let caughtBanner = false;
+
+function stepToward(target, speed, dt) {
+  const dx = target.x - ownerPos.x;
+  const dz = target.z - ownerPos.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 0.05) return 0;
+  const step = Math.min(d, speed * dt);
+  ownerPos.x += (dx / d) * step;
+  ownerPos.z += (dz / d) * step;
+  bed.standing.rotation.y = Math.atan2(dx, dz) - Math.PI / 2;
+  return d - step;   // remaining distance after this frame
+}
+
+function updateOwner(dt) {
+  if (wake < 0.7) {
+    ownerState = 'asleep';
+    ownerPos.copy(OWNER_SPAWN);
+    bed.standing.position.copy(ownerPos);
+    return;
+  }
+  if (ownerState === 'caught') return;
+
+  const OWNER_SPEED = 1.8;
+
+  // Two-phase walk: step out to the staging waypoint first so he clears the bed,
+  // then chase the cat from a position where the direct path is unobstructed.
+  if (ownerState === 'asleep' || ownerState === 'staging') {
+    ownerState = 'staging';
+    const remaining = stepToward(OWNER_STAGING, OWNER_SPEED, dt);
+    if (remaining <= 0) ownerState = 'searching';
+  } else {
+    // searching: walk toward the cat
+    stepToward({ x: catBody.position.x, z: catBody.position.z }, OWNER_SPEED, dt);
+  }
+
+  bed.standing.position.copy(ownerPos);
+
+  // Catch check only once searching (don't catch mid-staging through walls)
+  if (ownerState === 'searching') {
+    const toCat = Math.hypot(catBody.position.x - ownerPos.x, catBody.position.z - ownerPos.z);
+    if (toCat < 0.9 && !caughtBanner) {
+      ownerState = 'caught';
+      caughtBanner = true;
+      showBanner('CAUGHT!', '#e05a3a');
+      log('owner caught the cat', 'err');
+      setTimeout(() => { caughtBanner = false; }, 4000);
+    }
+  }
+}
+
+// ------------------------------------------------------------
+// Props: plates (five), mugs, book — the vertical slice contents
+// ------------------------------------------------------------
+let plateStart = []; // for drift measurement
+function makePlate(y, color=0xf2e6cf) {
+  const r = 0.18, h = 0.025;
+  // visual: inner dish + raised rim ring
+  const group = new THREE.Group();
+  const dish = new THREE.Mesh(new THREE.CylinderGeometry(r*0.92, r*0.92, h*0.6, 32), new THREE.MeshStandardMaterial({ color, roughness:0.35, metalness:0.02 }));
+  dish.position.y = -h*0.1; dish.castShadow = dish.receiveShadow = true;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(r*0.95, h*0.35, 8, 32), new THREE.MeshStandardMaterial({ color, roughness:0.35 }));
+  rim.rotation.x = Math.PI/2; rim.position.y = h*0.2; rim.castShadow = rim.receiveShadow = true;
+  const underside = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h*0.3, 32), new THREE.MeshStandardMaterial({ color:0xd8c8a8, roughness:0.5 }));
+  underside.position.y = -h*0.35; underside.castShadow = true;
+  group.add(dish, rim, underside);
+  const shape = new CANNON.Cylinder(r, r, h, 16);
+  const body = new CANNON.Body({ mass:0.25, shape, material:matCeramic, linearDamping:0.02, angularDamping:0.05 });
+  body.allowSleep = true; body.sleepSpeedLimit = 0.05; body.sleepTimeLimit = 0.8;
+  body.position.set(-2, y, 0);
+  group.position.copy(body.position);
+  return addBody(body, group, 'plate');
+}
+
+function makeMug(x, z, y=0.98) {
+  const r = 0.08, h = 0.14;
+  const colors = [0xe8d8c0, 0xc8826a, 0x6a8a9a];
+  const col = colors[(Math.random()*colors.length)|0];
+  const mat = new THREE.MeshStandardMaterial({ color:col, roughness:0.45, metalness:0.02 });
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r*0.9, h, 24), mat);
+  body.castShadow = body.receiveShadow = true;
+  // handle
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.012, 8, 20, Math.PI*1.3), mat);
+  handle.position.set(r+0.005, 0, 0); handle.rotation.y = Math.PI/2; handle.castShadow = true;
+  // inner (dark)
+  const inner = new THREE.Mesh(new THREE.CylinderGeometry(r*0.78, r*0.78, 0.01, 20), new THREE.MeshStandardMaterial({ color:0x2a1a14 }));
+  inner.position.y = h/2 - 0.015;
+  g.add(body, handle, inner);
+  const cBody = new CANNON.Body({ mass:0.3, shape:new CANNON.Cylinder(r, r*0.9, h, 12), material:matCeramic, linearDamping:0.01 });
+  cBody.position.set(x, y, z);
+  g.position.copy(cBody.position);
+  return addBody(cBody, g, 'mug');
+}
+
+function makeBook(x, z) {
+  const w=0.22, h=0.05, d=0.16;
+  const g = new THREE.Group();
+  const covers = [0x6a3a3a, 0x3a5a4a, 0x4a3a6a];
+  const cover = new THREE.Mesh(new THREE.BoxGeometry(w, h*0.3, d), new THREE.MeshStandardMaterial({ color: covers[(Math.random()*covers.length)|0], roughness:0.6 }));
+  cover.position.y = h*0.35; cover.castShadow = cover.receiveShadow = true;
+  const pages = new THREE.Mesh(new THREE.BoxGeometry(w*0.96, h*0.5, d*0.96), new THREE.MeshStandardMaterial({ color:0xf0e3c0, roughness:0.95 }));
+  pages.castShadow = pages.receiveShadow = true;
+  const back = new THREE.Mesh(new THREE.BoxGeometry(w, h*0.3, d), new THREE.MeshStandardMaterial({ color:0x3a2a2a, roughness:0.6 }));
+  back.position.y = -h*0.35; back.castShadow = true;
+  g.add(cover, pages, back);
+  const body = new CANNON.Body({ mass:0.4, shape:new CANNON.Box(new CANNON.Vec3(w/2,h/2,d/2)), material:matPaper });
+  body.position.set(x, 1.0, z);
+  g.position.copy(body.position);
+  return addBody(body, g, 'book');
+}
+
+function buildProps() {
+  // clear existing
+  for (const b of bodies.slice()) {
+    if (b.kind === 'plate' || b.kind === 'mug' || b.kind === 'book') {
+      world.removeBody(b.body); scene.remove(b.mesh);
+      const i = bodies.indexOf(b); bodies.splice(i,1);
+    }
+  }
+  plates = []; mugs = []; plateStart = [];
+  // five plates stacked on the desk top. Desk top is at y=0.94; spawn with
+  // real clearance and 1 cm vertical gap between plates so the solver settles
+  // them one layer at a time instead of chewing on an initial overlap.
+  const base = 0.97;
+  for (let i=0; i<5; i++) {
+    const p = makePlate(base + i*0.04, i%2 ? 0xf2e6cf : 0xe8d8b8);
+    plates.push(p);
+  }
+  // record initial positions (after settle)
+  // we'll populate plateStart after a brief settle in resetTests()
+  // mugs and book sit on the desk top (y=0.94). Each mug half-height is 0.07,
+  // so centre at 1.03 gives a 2 cm clearance. Book half-height 0.025.
+  mugs.push(makeMug(-2.6, -0.3, 1.03));
+  mugs.push(makeMug(-1.6, 0.3, 1.03));
+  book = makeBook(-2.1, 0.35);
+}
+buildProps();
+
+// ------------------------------------------------------------
+// Debug overlay (contacts, broad-phase hint, owner cone — minimal here)
+// ------------------------------------------------------------
+let debugOn = true;
+const contactDots = new THREE.Group(); scene.add(contactDots);
+const dotGeo = new THREE.SphereGeometry(0.03, 6, 6);
+const dotMat = new THREE.MeshBasicMaterial({ color:0xff5c6c });
+function clearDots() { while (contactDots.children.length) contactDots.remove(contactDots.children[0]); }
+function drawContacts() {
+  clearDots();
+  if (!debugOn) return;
+  for (const c of world.contacts.slice(0, 80)) {
+    const p = c.bi.position.vadd(c.ri);
+    const m = new THREE.Mesh(dotGeo, dotMat); m.position.set(p.x, p.y, p.z); contactDots.add(m);
+  }
+}
+
+// ------------------------------------------------------------
+// Noise model + wake meter
+// ------------------------------------------------------------
+let wake = 0;
+const stages = ['asleep','stirring','sitting up','standing','AWAKE'];
+// ============================================================
+// D workstream — tuning object. All magic numbers that affect noise, wake and
+// stage thresholds live here. Edit them live from the HUD panel; the values
+// persist in localStorage so a tuned curve survives a reload.
+// ============================================================
+const TUNING_DEFAULTS = {
+  // Noise model
+  impactFloor:     2.5,    // ignore any contact impulse below this
+  settleWindow:    4.0,    // seconds of startup quiet before impacts count
+  distAttenuation: 0.25,   // in 1/(1 + k*d^2); larger = quieter at range
+  logDivisor:      50,     // scales impulse into [0,1] via log1p / log(divisor)
+  // Wake meter
+  wakeDecay:       0.033,  // per second; 0.033 ≈ 30 s to drain full meter
+  // Stage thresholds (asleep < stirring < sittingUp < standing < awake)
+  thStirring:      0.15,
+  thSittingUp:     0.4,
+  thStanding:      0.7,
+  thAwake:         0.95,
+};
+const TUNING_KEY = 'loa.tuning.v1';
+const tuning = { ...TUNING_DEFAULTS };
+try {
+  const saved = JSON.parse(localStorage.getItem(TUNING_KEY) || 'null');
+  if (saved) Object.assign(tuning, saved);
+} catch (e) { /* ignore corrupt storage */ }
+function saveTuning() {
+  try { localStorage.setItem(TUNING_KEY, JSON.stringify(tuning)); } catch (e) {}
+}
+
+function stageFor(w) {
+  if (w >= tuning.thAwake)     return 4;
+  if (w >= tuning.thStanding)  return 3;
+  if (w >= tuning.thSittingUp) return 2;
+  if (w >= tuning.thStirring)  return 1;
+  return 0;
+}
+
+function reportImpact(bodyA, bodyB, impulse, position) {
+  const matA = bodyA.material?.name || 'wood';
+  const matB = bodyB.material?.name || 'wood';
+  const k = loudnessFor(matA, matB);
+  // log-scaled loudness so a 0.1 impact and a 50 impact both register
+  const loud = k * Math.log1p(impulse) / Math.log(tuning.logDivisor);
+  // distance attenuation to bed
+  const d = Math.hypot(position.x - bed.pos.x, position.y - bed.pos.y, position.z - bed.pos.z);
+  const atten = 1 / (1 + tuning.distAttenuation * d * d);
+  const contribution = loud * atten;
+  if (contribution > 0.005) {
+    wake = Math.min(1, wake + contribution);
+    lastImpact = { impulse, loud, d, contribution };
+  }
+}
+let lastImpact = null;
+
+// Settle period: the first 2 seconds of the scene are the solver resolving
+// stacked spawns. During this window we ignore impacts so the wake meter
+// starts clean and the owner never animates from startup contacts.
+let settleT = 0;
+// SETTLE_WINDOW and IMPACT_FLOOR now live in tuning.settleWindow / tuning.impactFloor
+world.addEventListener('postStep', () => {
+  if (settleT < tuning.settleWindow) return;
+  for (const c of world.contacts) {
+    const imp = Math.abs(c.getImpactVelocityAlongNormal ? c.getImpactVelocityAlongNormal() : 0);
+    if (imp > tuning.impactFloor) {
+      const p = c.bi.position.vadd(c.ri);
+      reportImpact(c.bi, c.bj, imp, { x:p.x, y:p.y, z:p.z });
+    }
+  }
+});
+
+// ------------------------------------------------------------
+// Tunneling guard: swept-sphere vs shelf AABB, gated by speed
+// ------------------------------------------------------------
+let GUARD_SPEED = 5;              // m/s; below this, no sweep
+let tunnelCount = 0;              // measured pass-throughs
+function sweepSphereVsAABB(p0, p1, radius, box) {
+  // Expand AABB by radius and ray-cast through it
+  const min = { x: box.min.x - radius, y: box.min.y - radius, z: box.min.z - radius };
+  const max = { x: box.max.x + radius, y: box.max.y + radius, z: box.max.z + radius };
+  const d = { x: p1.x-p0.x, y: p1.y-p0.y, z: p1.z-p0.z };
+  let tmin = 0, tmax = 1;
+  for (const ax of ['x','y','z']) {
+    if (Math.abs(d[ax]) < 1e-9) {
+      if (p0[ax] < min[ax] || p0[ax] > max[ax]) return null;
+    } else {
+      let t1 = (min[ax]-p0[ax])/d[ax], t2 = (max[ax]-p0[ax])/d[ax];
+      if (t1>t2) [t1,t2]=[t2,t1];
+      tmin = Math.max(tmin,t1); tmax = Math.min(tmax,t2);
+      if (tmin>tmax) return null;
+    }
+  }
+  return tmin;
+}
+
+function guardSweep(entry, prevPos) {
+  const b = entry.body;
+  const speed = b.velocity.length();
+  if (speed < GUARD_SPEED) return;
+  const p0 = prevPos, p1 = { x:b.position.x, y:b.position.y, z:b.position.z };
+  // for the slice, we only guard against the shelf
+  const t = sweepSphereVsAABB(p0, p1, 0.09, shelf.aabb);
+  if (t === null || t <= 0 || t >= 1) return;
+  // clamp body to just before the shelf surface and reflect vertical velocity
+  const nx = p0.x + (p1.x-p0.x)*t*0.98;
+  const ny = p0.y + (p1.y-p0.y)*t*0.98;
+  const nz = p0.z + (p1.z-p0.z)*t*0.98;
+  b.position.set(nx, ny, nz);
+  b.velocity.scale(0.3, b.velocity);
+  log(`guard: clamped fast body (v=${speed.toFixed(1)} m/s) at shelf`, 'ok');
+}
+
+// ------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------
+let stackTest = null;
+function startStackTest() {
+  // settle first, then record start positions
+  resetScene();
+  stackTest = { phase:'settle', t:0, pen:0, drift:0, start:[] };
+  log('stacking test: settling 2 s before recording start positions...', 'info');
+}
+
+let tunnelTest = null;
+function startTunnelTest() {
+  resetScene();
+  tunnelTest = { done:0, next:0, tunnelled:0, mug:null };
+  log('tunneling test: 100 swats at 12 m/s into the shelf', 'info');
+}
+
+let couplingTest = null;
+function startCouplingTest() {
+  resetScene();
+  couplingTest = { phase:'near', samples:[], wakeAt:{near:0, far:0} };
+  log('coupling test: swat near the bed, then from the far wall', 'info');
+}
+
+// swat helpers
+function swatBody(entry, dir, speed) {
+  entry.body.wakeUp();
+  entry.body.velocity.set(dir.x*speed, 0.5*speed*0.3, dir.z*speed);
+  entry.body.angularVelocity.set(Math.random()*4-2, Math.random()*4-2, Math.random()*4-2);
+}
+
+function spawnTunnelMug() {
+  // spawn a mug at a known start pos and fire it at the shelf at 12 m/s
+  const start = { x: 0.2, y: 1.4, z: 0 };
+  const target = { x: shelf.body.position.x + 0.9, y: 1.4, z: 0 };
+  const dir = { x: target.x-start.x, y:0, z: target.z-start.z };
+  const len = Math.hypot(dir.x, dir.z); dir.x/=len; dir.z/=len;
+  const mug = makeMug(start.x, start.z);
+  mug.body.position.set(start.x, start.y, start.z);
+  mug.body.velocity.set(dir.x*12, 0, dir.z*12);
+  return mug;
+}
+
+// previous positions for the guard
+const prevPos = new Map();
+
+// ------------------------------------------------------------
+// Scene reset
+// ------------------------------------------------------------
+function resetScene() {
+  buildProps(); wake = 0; stackTest = null; tunnelTest = null; couplingTest = null;
+  log('scene reset', 'info');
+}
+
+// ------------------------------------------------------------
+// Input: click to swat; space to swat the mug on the desk
+// ------------------------------------------------------------
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let orbiting = false, last={x:0,y:0};
+renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
+renderer.domElement.addEventListener('pointerdown', e=>{
+  // right-drag orbits the camera; left-click does nothing (objects fall only
+  // when the cat physically bumps into them)
+  if (e.button === 2) { orbiting = true; last={x:e.clientX,y:e.clientY}; return; }
+});
+addEventListener('pointerup', ()=>orbiting=false);
+addEventListener('pointermove', e=>{
+  if (!orbiting) return;
+  orbit.theta += (e.clientX-last.x)*0.005;
+  orbit.phi = Math.max(0.1, Math.min(Math.PI*0.49, orbit.phi + (e.clientY-last.y)*0.005));
+  last = { x:e.clientX, y:e.clientY };
+  updateCamera();
+});
+addEventListener('wheel', e=>{ orbit.radius = Math.max(6, Math.min(40, orbit.radius + e.deltaY*0.01)); updateCamera(); }, { passive:true });
+// (space is now reserved for the cat jump; the old "space swats first mug" shortcut was removed)
+addEventListener('resize', ()=>{ camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+// buttons
+document.getElementById('runStack').onclick = startStackTest;
+document.getElementById('runTunnel').onclick = startTunnelTest;
+document.getElementById('runCoupling').onclick = startCouplingTest;
+document.getElementById('reset').onclick = resetScene;
+document.getElementById('togDebug').onclick = ()=>{ debugOn = !debugOn; if (!debugOn) clearDots(); log(`debug overlay ${debugOn?'ON':'OFF'}`, 'info'); };
+document.getElementById('togSleep').onclick = ()=>{ world.allowSleep = !world.allowSleep; log(`body sleeping ${world.allowSleep?'ON':'OFF'}`, 'info'); };
+
+// ------------------------------------------------------------
+// Measurement helpers
+// ------------------------------------------------------------
+function maxPlatePenetration() {
+  let maxPen = 0;
+  for (let i=0; i<plates.length-1; i++) {
+    const a = plates[i].body.position, b = plates[i+1].body.position;
+    // Approximate penetration as overlap on y relative to plate height (0.025)
+    const dy = Math.abs(a.y - b.y);
+    const pen = Math.max(0, 0.025 - dy);
+    if (pen > maxPen) maxPen = pen;
+  }
+  return maxPen;
+}
+function stackCenter() {
+  let x=0,z=0; for (const p of plates) { x += p.body.position.x; z += p.body.position.z; }
+  return { x: x/plates.length, z: z/plates.length };
+}
+function stackDrift(start) {
+  const c = stackCenter();
+  return Math.hypot(c.x-start.x, c.z-start.z);
+}
+
+// ------------------------------------------------------------
+// Main loop
+// ------------------------------------------------------------
+let last_t = performance.now()/1000;
+let frames=0, fpsAcc=0, fps=0, pstep=0;
+const fpsEl=document.getElementById('fps'), bodiesEl=document.getElementById('bodies'), pairsEl=document.getElementById('pairs'), pstepEl=document.getElementById('pstep');
+const penEl=document.getElementById('pen'), driftEl=document.getElementById('drift'), stackTEl=document.getElementById('stackT'), stackSEl=document.getElementById('stackS');
+const swatsEl=document.getElementById('swats'), tunnelEl=document.getElementById('tunnel'), gateEl=document.getElementById('gate');
+const wakeVEl=document.getElementById('wakeV'), stageEl=document.getElementById('stage'), lastIEl=document.getElementById('lastI'), wakeFill=document.getElementById('wakeFill');
+const banner=document.getElementById('banner');
+
+function showBanner(text, color) { banner.textContent = text; banner.style.color = color; banner.style.display='block'; setTimeout(()=>banner.style.display='none', 3500); }
+
+function tick() {
+  requestAnimationFrame(tick);
+  const now = performance.now()/1000;
+  const dt = Math.min(now - last_t, 0.1);
+  last_t = now;
+
+  // record previous positions for the guard, then step
+  for (const b of bodies) {
+    if (b.body.mass > 0 && b.body.velocity.length() > GUARD_SPEED) {
+      prevPos.set(b, { x:b.body.position.x, y:b.body.position.y, z:b.body.position.z });
+    }
+  }
+  const t0 = performance.now();
+  world.step(FIXED_STEP, dt, MAX_SUBSTEPS);
+  pstep = (pstep*0.9) + (performance.now() - t0) * 0.1;
+  const wasSettling = settleT < tuning.settleWindow;
+  settleT += dt;
+  if (settleT < tuning.settleWindow) wake = 0;
+  else if (wasSettling) log('scene settled: wake meter now responsive', 'ok');
+
+  // guard: clamp fast bodies that would cross the shelf
+  for (const [b, p0] of prevPos) {
+    guardSweep(b, p0);
+    // measure actual pass-throughs, but only once the scene has settled, otherwise
+    // falling bookshelf items during startup register as false tunnels
+    if (settleT < tuning.settleWindow) continue;
+    const p1 = b.body.position;
+    const crossed = (p0.y - shelf.aabb.min.y) * (p1.y - shelf.aabb.min.y) < 0;
+    const withinXZ = p1.x > shelf.aabb.min.x && p1.x < shelf.aabb.max.x && p1.z > shelf.aabb.min.z && p1.z < shelf.aabb.max.z;
+    if (crossed && withinXZ && b.body.velocity.length() > GUARD_SPEED) {
+      tunnelCount++; log('TUNNEL: a body passed through the shelf', 'err');
+      if (tunnelTest) tunnelTest.tunnelled++;
+    }
+  }
+  prevPos.clear();
+
+  // sync meshes
+  for (const b of bodies) {
+    b.mesh.position.copy(b.body.position);
+    b.mesh.quaternion.copy(b.body.quaternion);
+  }
+
+  // cat controller runs always; owner search only after settle
+  updateCat(dt);
+  if (settleT >= tuning.settleWindow) updateOwner(dt);
+
+  // decay wake meter: ~30 seconds from full to empty
+  wake = Math.max(0, wake - tuning.wakeDecay * dt);
+  // Animate owner smoothly between stages. We use `wake` directly (continuous 0..1)
+  // instead of discrete stage, so going back to sleep is a smooth descent rather than
+  // a teleport. Three visible regions map onto wake:
+  //   wake < 0.4            : in bed, mostly still (slight bob while stirring)
+  //   0.4 <= wake < 0.7     : sitting up (head rises off the pillow)
+  //   wake >= 0.7           : standing beside the bed
+  const wSit = Math.max(0, Math.min(1, (wake - 0.15) / 0.25));     // 0 at 0.15, 1 at 0.4
+  const wStand = Math.max(0, Math.min(1, (wake - 0.6) / 0.1));     // 0 at 0.6, 1 at 0.7
+  // Sleeper: bobs when stirring, head lifts for sitting up, fades out as standing takes over
+  const bob = Math.sin(now*3) * 0.015 * Math.min(1, wake*5);
+  bed.headGroup.position.y = 0.74 + bob + wSit * 0.3;
+  bed.headGroup.rotation.x = -0.35 * wSit;
+  bed.headGroup.visible = wStand < 1;
+  bed.lump.visible = wStand < 1;
+  // Standing figure fades in and gently sways
+  bed.standing.visible = wStand > 0;
+  bed.standing.scale.setScalar(0.6 + 0.4 * wStand);   // small pop as he rises
+  // when searching, updateOwner() drives position and rotation; otherwise he idles beside bed
+  if (ownerState !== 'searching' && ownerState !== 'caught') {
+    bed.standing.position.y = 0.07 + Math.sin(now*2.0) * 0.01 * wStand;
+    bed.standing.rotation.y = -Math.PI/2 + Math.sin(now*1.2) * 0.04 * wStand;
+  }
+
+  // stacking test
+  if (stackTest) {
+    stackTest.t += dt;
+    if (stackTest.phase === 'settle' && stackTest.t > 2) {
+      // disable sleeping so the solver can't hide jitter
+      for (const p of plates) p.body.allowSleep = false;
+      world.allowSleep = false;
+      stackTest.start = { ...stackCenter() };
+      stackTest.phase = 'measure'; stackTest.t = 0;
+      log('stacking test: measuring for 60 s with sleeping disabled...', 'info');
+    } else if (stackTest.phase === 'measure') {
+      stackTest.pen = Math.max(stackTest.pen, maxPlatePenetration());
+      stackTest.drift = Math.max(stackTest.drift, stackDrift(stackTest.start));
+      if (stackTest.t >= 60) {
+        const ok = stackTest.pen < 0.002 && stackTest.drift < 0.005;
+        log(`stacking result: max pen ${(stackTest.pen*1000).toFixed(2)} mm, drift ${(stackTest.drift*1000).toFixed(2)} mm — ${ok?'PASS':'FAIL'}`, ok?'ok':'err');
+        showBanner(ok?'Stacking PASS':'Stacking FAIL', ok?'#6ac47a':'#e05a3a');
+        for (const p of plates) p.body.allowSleep = true;
+        world.allowSleep = true;
+        stackTest.phase = 'done';
+      }
+    }
+  }
+
+  // tunneling test (one swat per second)
+  if (tunnelTest) {
+    tunnelTest.next -= dt;
+    if (tunnelTest.next <= 0 && tunnelTest.done < 100) {
+      if (tunnelTest.mug) {
+        // despawn
+        world.removeBody(tunnelTest.mug.body); scene.remove(tunnelTest.mug.mesh);
+        const i = bodies.indexOf(tunnelTest.mug); if (i>=0) bodies.splice(i,1);
+      }
+      tunnelTest.mug = spawnTunnelMug();
+      tunnelTest.done++;
+      tunnelTest.next = 0.6;
+    }
+    if (tunnelTest.done >= 100 && (!tunnelTest.mug || tunnelTest.mug.body.sleepState === CANNON.Body.SLEEPING)) {
+      const ok = tunnelTest.tunnelled === 0;
+      log(`tunneling result: 100 swats, ${tunnelTest.tunnelled} pass-throughs — ${ok?'PASS':'FAIL'}`, ok?'ok':'err');
+      showBanner(ok?'Tunneling PASS':'Tunneling FAIL', ok?'#6ac47a':'#e05a3a');
+      tunnelTest = null;
+    }
+  }
+
+  // coupling test
+  if (couplingTest) {
+    if (couplingTest.phase === 'near' && wake < 0.01 && !couplingTest.fired) {
+      couplingTest.fired = true;
+      // spawn a mug beside the bed and launch it into the wall
+      const m = makeMug(bed.pos.x - 0.5, bed.pos.z);
+      m.body.velocity.set(0, 0, -5);
+      setTimeout(() => { couplingTest.wakeAt.near = wake; couplingTest.phase = 'reset'; wake = 0; couplingTest.fired = false; }, 1500);
+    } else if (couplingTest.phase === 'reset') {
+      setTimeout(() => { couplingTest.phase = 'far'; }, 500);
+      couplingTest.phase = 'waiting';
+    } else if (couplingTest.phase === 'far' && !couplingTest.fired) {
+      couplingTest.fired = true;
+      const m = makeMug(-4.5, 4.5);     // far wall
+      m.body.velocity.set(0, 0, -5);
+      setTimeout(() => {
+        couplingTest.wakeAt.far = wake;
+        const ok = couplingTest.wakeAt.near > 0.4 && couplingTest.wakeAt.far < 0.15;
+        log(`coupling: near=${couplingTest.wakeAt.near.toFixed(2)}, far=${couplingTest.wakeAt.far.toFixed(2)} — ${ok?'PASS':'FAIL'}`, ok?'ok':'err');
+        showBanner(ok?'Coupling PASS':'Coupling FAIL', ok?'#6ac47a':'#e05a3a');
+        couplingTest = null;
+      }, 1500);
+    }
+  }
+
+  // HUD updates
+  frames++; fpsAcc += dt;
+  if (fpsAcc >= 0.5) { fps = frames/fpsAcc; frames=0; fpsAcc=0; }
+  const activeBodies = bodies.filter(b => b.body.sleepState !== CANNON.Body.SLEEPING).length + 2;
+  fpsEl.textContent = fps.toFixed(0);
+  fpsEl.className = 'v ' + (fps >= 55 ? 'pass' : fps >= 30 ? 'warn' : 'fail');
+  bodiesEl.textContent = `${activeBodies} / ${bodies.length + 2}`;
+  pairsEl.textContent = world.contacts.length;
+  pstepEl.textContent = pstep.toFixed(2);
+
+  if (stackTest) {
+    penEl.textContent = `${(stackTest.pen*1000).toFixed(2)} mm`;
+    driftEl.textContent = `${(stackTest.drift*1000).toFixed(2)} mm`;
+    stackTEl.textContent = `${stackTest.t.toFixed(1)} s`;
+    stackSEl.textContent = stackTest.phase;
+    penEl.className = 'v ' + (stackTest.pen < 0.002 ? 'pass' : 'fail');
+    driftEl.className = 'v ' + (stackTest.drift < 0.005 ? 'pass' : 'fail');
+  } else { penEl.textContent='—'; driftEl.textContent='—'; stackTEl.textContent='—'; stackSEl.textContent='idle'; }
+
+  swatsEl.textContent = tunnelTest ? `${tunnelTest.done} / 100` : '0 / 100';
+  tunnelEl.textContent = tunnelTest ? tunnelTest.tunnelled : tunnelCount;
+  tunnelEl.className = 'v ' + ((tunnelTest ? tunnelTest.tunnelled : tunnelCount) === 0 ? 'pass' : 'fail');
+  gateEl.textContent = `${GUARD_SPEED} m/s`;
+
+  wakeVEl.textContent = wake.toFixed(2);
+  stageEl.textContent = stages[stageFor(wake)];
+  stageEl.className = 'v ' + (stageFor(wake) >= 3 ? 'fail' : stageFor(wake) >= 1 ? 'warn' : 'pass');
+  wakeFill.style.width = `${(wake*100).toFixed(0)}%`;
+  lastIEl.textContent = lastImpact ? `imp ${lastImpact.impulse.toFixed(2)}, d ${lastImpact.d.toFixed(1)}m` : '—';
+  const held = Object.keys(catKeys).filter(k => catKeys[k]).join(' ') || '—';
+  document.getElementById('keysDbg').textContent = held;
+
+  drawContacts();
+  renderer.render(scene, camera);
+}
+// ============================================================
+// Tuning panel wiring: sliders bind to the `tuning` object, persist to
+// localStorage, and the display next to each shows the live value.
+// ============================================================
+(function wireTuningPanel() {
+  const head = document.getElementById('tuneHead');
+  const body = document.getElementById('tuneBody');
+  head.addEventListener('click', () => {
+    head.classList.toggle('open');
+    body.classList.toggle('open');
+  });
+
+  const format = (k, v) => {
+    if (k === 'logDivisor' || k === 'settleWindow') return Number(v).toFixed(1);
+    if (k === 'wakeDecay') return Number(v).toFixed(3);
+    return Number(v).toFixed(2);
+  };
+
+  function refresh() {
+    document.querySelectorAll('[data-k]').forEach(inp => {
+      const k = inp.dataset.k;
+      inp.value = tuning[k];
+    });
+    document.querySelectorAll('[data-tv]').forEach(span => {
+      const k = span.dataset.tv;
+      span.textContent = format(k, tuning[k]);
+    });
+  }
+
+  document.querySelectorAll('[data-k]').forEach(inp => {
+    const k = inp.dataset.k;
+    inp.addEventListener('input', (e) => {
+      tuning[k] = parseFloat(e.target.value);
+      const span = document.querySelector(`[data-tv="${k}"]`);
+      if (span) span.textContent = format(k, tuning[k]);
+      saveTuning();
+    });
+    // prevent arrow-keys here from stealing cat input
+    inp.addEventListener('keydown', e => e.stopPropagation());
+  });
+
+  document.getElementById('tuneReset').addEventListener('click', () => {
+    Object.assign(tuning, TUNING_DEFAULTS);
+    saveTuning();
+    refresh();
+    log('tuning reset to defaults', 'info');
+  });
+  document.getElementById('tuneExport').addEventListener('click', async () => {
+    const text = JSON.stringify(tuning, null, 2);
+    try { await navigator.clipboard.writeText(text); log('tuning copied to clipboard', 'ok'); }
+    catch (e) { log(text, 'info'); }
+  });
+
+  refresh();
+})();
+
+log('ready. Press a test button or click a prop to swat it.', 'ok');
+tick();
+</script>
+</body>
+</html>
