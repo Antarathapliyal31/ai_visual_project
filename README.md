@@ -37,7 +37,7 @@ The coupling: the solver's contact impulses are the input to the AI's perception
 
 ---
 
-## What's built so far (as of Oct 11)
+## What's built so far by Antara(as of Oct 11)
 
 The MVP is a single HTML file on the `antara` branch (`last-one-awake-mvp.html`). It runs end to end: cat moves, bumps things, noise feeds the wake meter, owner wakes up and catches the cat. All built in Three.js + cannon-es, no engine.
 
