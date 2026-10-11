@@ -56,16 +56,6 @@ The MVP is a single HTML file on the `antara` branch (`last-one-awake-mvp.html`)
 - Debug overlay: contact dots, toggles for debug and body sleeping, event log in bottom-left
 - Live tuning panel: 9 sliders for noise and wake parameters, saved to localStorage, Reset / Copy JSON actions
 
-**Not yet done (next week):**
-- Split the single HTML into the Vite project structure below (Rushi, W1)
-- Deploy to Vercel for a live URL
-- Awake-owner behavior tree with proper investigate / search / return behaviors (Christina)
-- Material table expanded to plastic, fabric, cat (Rushi)
-- Stacking tuning until the proof passes under 2 mm / 5 mm (Rushi)
-- Custom grid broad phase, raycast API, fracture (Dharm)
-- Chaos score, round timer, start / caught / win screens (Antara)
-- Headless Vitest harness so proofs run in CI (Antara)
-- Baked lighting polish (Christina)
 
 ---
 
