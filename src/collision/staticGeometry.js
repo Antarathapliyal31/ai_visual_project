@@ -9,8 +9,9 @@
 //
 // Units m, Y up, origin at the floor centre. The room is a cut-away with two
 // walls, laid out after docs/concept/ref3d.png:
-//   west wall  (inner face x = -3.5): bed, nightstand, 2 cm wall shelf
-//   north wall (inner face z = -3.0): desk, window sill, bookshelf
+//   west wall  (inner face x = -3.5): bed, nightstand, 2 cm wall shelf, couch
+//   north wall (inner face z = -3.0): aquarium, desk, window sill, bookshelf
+//   open floor: coffee table by the couch, chair at the desk, cat tree by the east edge
 //
 // No Three.js here: simulation code must run headless.
 
@@ -73,7 +74,54 @@ export const STATIC_BOXES = [
   ...[0.015, 0.515, 1.015, 1.515, 1.985].map((y, i) => ({
     id: `bookshelfPanel${i}`, center: [3.05, y, -2.815], half: [0.41, 0.015, 0.165], material: 'wood', role: 'solid',
   })),
+
+  // --- Couch on the west wall, south of the bed, facing into the room. The
+  // seat is a 42 cm step, the arms 62 cm, the top of the back an 86 cm ledge. ---
+  { id: 'couchBack', center: [-3.39, 0.43, 2.02], half: [0.11, 0.43, 0.9], material: 'fabric', role: 'solid' },
+  { id: 'couchSeat', center: [-2.94, 0.21, 2.02], half: [0.34, 0.21, 0.7], material: 'fabric', role: 'solid' },
+  { id: 'couchArmNorth', center: [-2.94, 0.31, 1.22], half: [0.34, 0.31, 0.1], material: 'fabric', role: 'solid' },
+  { id: 'couchArmSouth', center: [-2.94, 0.31, 2.82], half: [0.34, 0.31, 0.1], material: 'fabric', role: 'solid' },
+
+  // --- Coffee table in front of the couch: a top at 45 cm, a low shelf, and
+  // 26 cm between them, enough for the cat. ---
+  { id: 'coffeeTableTop', center: [-1.85, 0.425, 2.02], half: [0.3, 0.025, 0.55], material: 'wood', role: 'solid' },
+  { id: 'coffeeTableShelf', center: [-1.85, 0.13, 2.02], half: [0.22, 0.012, 0.47], material: 'wood', role: 'solid' },
+  ...[[-2.1, 1.52], [-2.1, 2.52], [-1.6, 1.52], [-1.6, 2.52]].map(([x, z], i) => ({
+    id: `coffeeTableLeg${i}`, center: [x, 0.2, z], half: [0.03, 0.2, 0.03], material: 'wood', role: 'solid',
+  })),
+
+  // --- Aquarium on a cabinet, on the north wall between the bed and the
+  // desk. It leaves a 75 cm passage to the desk's side panel. ---
+  { id: 'aquariumCabinet', center: [-1.95, 0.35, -2.76], half: [0.6, 0.35, 0.24], material: 'wood', role: 'solid' },
+  { id: 'aquariumTank', center: [-1.95, 0.96, -2.76], half: [0.52, 0.26, 0.2], material: 'plastic', role: 'solid' },
+  { id: 'aquariumLid', center: [-1.95, 1.235, -2.76], half: [0.54, 0.015, 0.22], material: 'plastic', role: 'solid' },
+
+  // --- Desk chair, pulled out and turned a little, clear of the spot the
+  // owner crouches at to look under the desk. The seat is a 50 cm step. ---
+  ...turnedGroup([1.05, -1.72], 0.3, [
+    { id: 'chairBase', at: [0, 0.03, 0], half: [0.26, 0.03, 0.26], material: 'plastic' },
+    { id: 'chairPost', at: [0, 0.24, 0], half: [0.035, 0.18, 0.035], material: 'plastic' },
+    { id: 'chairSeat', at: [0, 0.46, 0], half: [0.23, 0.04, 0.23], material: 'fabric' },
+    { id: 'chairBack', at: [0, 0.78, 0.21], half: [0.21, 0.24, 0.03], material: 'fabric' },
+  ]),
+
+  // --- Cat tree by the east edge: a cubby (45 cm) and a perch (1 m) on a post. ---
+  { id: 'catTreeBase', center: [3.05, 0.025, 0.4], half: [0.3, 0.025, 0.3], material: 'fabric', role: 'solid' },
+  { id: 'catTreeHouse', center: [3.05, 0.25, 0.52], half: [0.24, 0.2, 0.18], material: 'fabric', role: 'solid' },
+  { id: 'catTreePost', center: [3.05, 0.5, 0.2], half: [0.055, 0.45, 0.055], material: 'fabric', role: 'solid' },
+  { id: 'catTreePerch', center: [3.05, 0.975, 0.3], half: [0.26, 0.025, 0.22], material: 'fabric', role: 'solid' },
 ];
+
+/**
+ * Boxes that share one yaw about a common centre. `at` is each box's centre
+ * in the group's own frame (x right, y up, z towards the room).
+ */
+function turnedGroup([cx, cz], yaw, parts) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return parts.map(({ id, at: [x, y, z], half, material }) => ({
+    id, center: [cx + x * c + z * s, y, cz - x * s + z * c], half, rotY: yaw, material, role: 'solid',
+  }));
+}
 
 // Bed skirt: fabric hanging from the platform to 2 cm above the floor on the
 // three open sides. The cat walks through it; the owner can't see through it.
@@ -105,6 +153,13 @@ export const SURFACES = {
   windowSillTop: 0.97,
   bookshelfShelves: [0.03, 0.53, 1.03, 1.53],
   bookshelfTop: 2.0,
+  couchSeatTop: 0.42,
+  coffeeTableTop: 0.45,
+  coffeeTableShelfTop: 0.142,
+  aquariumTop: 1.25,
+  chairSeatTop: 0.5,
+  catTreeHouseTop: 0.45,
+  catTreePerchTop: 1.0,
 };
 
 const defaultMaterials = new Map();
