@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dynamics &amp; Cat Demo</title>
+<!--
+  Live demo of Workstream B (dynamics and cat). Runs the real modules from
+  src/physics/ and src/player/ and the stacking scenario from
+  harness/scenarios/ in the browser; Three.js is only used here for drawing.
+
+  Serve the repo root over HTTP (ES modules don't load from file://):
+    python3 -m http.server 8550
+  then open http://localhost:8550/harness/dynamics-demo.html
+-->
+<style>
+  :root { --bg:#14111c; --panel:rgba(28,23,40,.94); --ink:#f3e7d3; --muted:#a89fb3; --line:#3b3050;
+          --amber:#e8a33c; --green:#6ac47a; --red:#e05a3a; --blue:#7fa8e0; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
+               font:13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  canvas { display:block; }
+  #panel { position:fixed; top:12px; left:12px; width:340px; max-height:calc(100% - 24px); overflow:auto;
+           background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  h1 { font-size:14px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:11px; margin:0 0 10px; }
+  .tabs { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:10px; }
+  #gameLink { display:block; margin:0 0 10px; padding:8px 10px; border-radius:6px; background:var(--amber); color:#1a1020; font-weight:700;
+              text-decoration:none; text-align:center; }
+  #gameLink:hover { filter:brightness(1.08); }
+  #gameLink small { display:block; font-weight:500; font-size:11px; }
+  button { font:inherit; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:6px;
+           padding:6px 8px; cursor:pointer; text-align:left; }
+  button:hover { border-color:#6a5888; }
+  button.on { background:var(--amber); color:#1a1020; border-color:var(--amber); font-weight:600; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
+  .row label { color:var(--muted); }
+  .row input[type=range] { width:150px; }
+  select { font:inherit; background:#1c1628; color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:3px; }
+  .btns { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+  .section { margin-top:10px; padding-top:8px; border-top:1px solid var(--line); }
+  .section h2 { font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); margin:0 0 6px; font-weight:600; }
+  #stats { display:grid; grid-template-columns:max-content minmax(0, 1fr); gap:3px 10px; font-variant-numeric:tabular-nums; }
+  #stats .k { color:var(--muted); }
+  #stats div:nth-child(even) { text-align:right; overflow-wrap:anywhere; }
+  .pass { color:var(--green); } .fail { color:var(--red); } .warn { color:var(--amber); }
+  #help { color:var(--muted); font-size:11.5px; }
+  #help b { color:var(--ink); font-weight:600; }
+  kbd { font:inherit; font-size:11px; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 4px; color:var(--ink); }
+  #banner { position:fixed; left:50%; top:16%; transform:translateX(-50%); padding:12px 26px; background:var(--panel);
+            border:1px solid var(--line); border-radius:10px; font-size:20px; font-weight:600; display:none; pointer-events:none; }
+  #legend { position:fixed; right:12px; bottom:12px; background:var(--panel); border:1px solid var(--line); border-radius:10px;
+            padding:8px 12px; font-size:11.5px; color:var(--muted); }
+  #legend span { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+  @media (max-width: 640px) { #panel { width:calc(100% - 24px); max-height:45%; } #legend { display:none; } }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Dynamics and cat: debug view</h1>
+  <p class="sub">Workstream B · real modules from src/physics and src/player</p>
+  <a id="gameLink" href="play.html">Open the game view &rarr;<small>the full room in the cozy look; this page shows colliders and proofs</small></a>
+  <div class="tabs">
+    <button data-mode="play">Cat &amp; slice scene</button>
+    <button data-mode="stack">Stacking proof</button>
+    <button data-mode="friction">Friction</button>
+  </div>
+  <div id="controls"></div>
+  <div class="section"><h2>Live numbers</h2><div id="stats"></div></div>
+  <div class="section"><h2>What you're seeing</h2><div id="help"></div></div>
+</div>
+<div id="banner"></div>
+<div id="legend">
+  <div><span style="background:#7a6a92"></span>static collider (A's STATIC_BOXES)</div>
+  <div><span style="background:#ff9f43"></span>occluder (the cat walks through)</div>
+  <div><span style="background:#f2e6cf"></span>ceramic · dim = sleeping</div>
+  <div><span style="background:#8fb38a"></span>paper</div>
+  <div><span style="background:#ff7b54"></span>debris</div>
+  <div><span style="background:#6fd3ff"></span>cat · paw volume</div>
+  <div><span style="background:#ff4d6d"></span>contact point</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as CANNON from 'cannon-es';
+import { tuning } from '../src/core/tuning.js';
+import { hidingSpotAt, SURFACES } from '../src/collision/index.js';
+import { createPhysicsWorld, spawnSliceScene, physicsDebugData, SLICE_LAYOUT } from '../src/physics/index.js';
+import { createCat, inputFromKeys, cameraRelativeInput, CAT_KEYS } from '../src/player/index.js';
+import { createStackingScenario, STACK_LIMITS } from './scenarios/stacking.js';
+
+const DT = tuning.physics.fixedStep;
+const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------------ three
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14111c);
+scene.add(new THREE.HemisphereLight(0xc9d6ff, 0x2a2233, 1.1));
+const sun = new THREE.DirectionalLight(0xfff0dd, 1.4);
+sun.position.set(4, 8, 5);
+scene.add(sun);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.01, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+function frameCamera(pos, target) {
+  camera.position.set(...pos);
+  controls.target.set(...target);
+  controls.update();
+}
+
+// ---------------------------------------------------- body -> mesh views
+const COLORS = { ceramic: 0xf2e6cf, paper: 0x8fb38a, plastic: 0x7fa8e0, wood: 0xb8925f, fabric: 0xc98b9a, debris: 0xff7b54 };
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x2b2238 });
+const wireMat = new THREE.LineBasicMaterial({ color: 0x47d18c, transparent: true, opacity: 0.9, depthTest: false });
+
+/** Triangles of a cannon-es convex shape (its faces fanned out). */
+function convexGeometry(shape) {
+  const pos = [];
+  for (const f of shape.faces) {
+    for (let i = 1; i < f.length - 1; i++) {
+      for (const k of [f[0], f[i], f[i + 1]]) {
+        const v = shape.vertices[k];
+        pos.push(v.x, v.y, v.z);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** The collider itself, for the "show colliders" wireframe. */
+function colliderGeometry(shape) {
+  const T = CANNON.Shape.types;
+  if (shape.type === T.BOX) return new THREE.BoxGeometry(shape.halfExtents.x * 2, shape.halfExtents.y * 2, shape.halfExtents.z * 2);
+  if (shape.type === T.SPHERE) return new THREE.SphereGeometry(shape.radius, 12, 8);
+  return convexGeometry(shape);
+}
+
+/**
+ * A mesh from a prop's or a debris piece's plain visual spec. This is the
+ * round mesh; the collider underneath is the coarse one.
+ */
+function geometryFromVisual(v) {
+  if (v.type === 'cylinder') {
+    return new THREE.CylinderGeometry(v.radiusTop ?? v.radius, v.radiusBottom ?? v.radius, v.height, 40);
+  }
+  if (v.type === 'box') return new THREE.BoxGeometry(v.half[0] * 2, v.half[1] * 2, v.half[2] * 2);
+  if (v.type === 'prism') {
+    // Convex polygon in XZ extruded along Y.
+    const pos = [];
+    const n = v.polygon.length, h = v.halfHeight;
+    const P = (i, y) => [v.polygon[i % n][0], y, v.polygon[i % n][1]];
+    for (let i = 1; i < n - 1; i++) {
+      pos.push(...P(0, h), ...P(i + 1, h), ...P(i, h));
+      pos.push(...P(0, -h), ...P(i, -h), ...P(i + 1, -h));
+    }
+    for (let i = 0; i < n; i++) {
+      pos.push(...P(i, -h), ...P(i, h), ...P(i + 1, h));
+      pos.push(...P(i, -h), ...P(i + 1, h), ...P(i + 1, -h));
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    return g;
+  }
+  return new THREE.BoxGeometry(0.05, 0.05, 0.05);
+}
+
+/** The cat, modelled facing +x around its two collider spheres. */
+function catMesh(dims) {
+  const g = new THREE.Group();
+  const fur = new THREE.MeshStandardMaterial({ color: 0x6fd3ff, roughness: 0.8 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2d6f8f, roughness: 0.8 });
+  const r = dims.radius, hl = dims.halfLength;
+  for (const x of hl > 0 ? [hl, -hl] : [0]) {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), fur);
+    s.position.x = x;
+    g.add(s);
+  }
+  if (hl > 0) {
+    const mid = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 2 * hl, 20, 1, true), fur);
+    mid.rotation.z = Math.PI / 2;
+    g.add(mid);
+  }
+  for (const z of [-0.05, 0.05]) {
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.06, 8), dark);
+    ear.position.set(hl + 0.03, r * 0.95, z);
+    g.add(ear);
+  }
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.025, 10, 8), dark);
+  nose.position.set(hl + r * 0.98, 0, 0);
+  g.add(nose);
+  const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.012, 0.22, 8), dark);
+  tail.position.set(-hl - r * 0.9, 0.06, 0);
+  tail.rotation.z = -0.9;
+  g.add(tail);
+  g.userData = { mat: fur, base: new THREE.Color(0x6fd3ff) };
+  return g;
+}
+
+class PhysicsView {
+  /** @param physics a createPhysicsWorld() result */
+  constructor(physics, { cat = null, showColliders = false } = {}) {
+    this.physics = physics;
+    this.cat = cat;
+    this.showColliders = showColliders;
+    this.map = new Map();
+    this.group = new THREE.Group();
+    scene.add(this.group);
+  }
+
+  staticStyle(body) {
+    const ud = body.userData ?? {};
+    if (ud.role === 'occluder') return { color: 0xff9f43, opacity: 0.4, edges: true };
+    if (ud.staticId?.startsWith('boundary')) return { color: 0x8877aa, opacity: 0.05, edges: false };
+    if (ud.staticId === 'floor' || ud.staticId === 'slab') return { color: 0x3a3048, opacity: 1, edges: true };
+    if (ud.staticId?.startsWith('wall')) return { color: 0x51456a, opacity: 0.3, edges: true };
+    return { color: 0x7a6a92, opacity: 0.9, edges: true };
+  }
+
+  make(body) {
+    let g;
+    const record = this.physics.props.find((p) => p.body === body) ?? this.physics.debris.find((p) => p.body === body);
+    if (this.cat && body === this.cat.body) {
+      g = catMesh(this.cat.dims);
+    } else if (record) {
+      // Props and debris: the mesh comes from the visual spec, not from the collider.
+      const color = record.kind === 'debris' ? COLORS.debris : COLORS[record.material] ?? 0xe8a33c;
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.03, side: THREE.DoubleSide });
+      const geo = geometryFromVisual(record.visual);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 40), edgeMat));
+      g = new THREE.Group();
+      g.add(mesh);
+      g.userData = { mat, base: new THREE.Color(color) };
+    } else {
+      const s = body.type === CANNON.Body.STATIC ? this.staticStyle(body) : { color: 0xe8a33c, opacity: 1, edges: true };
+      const mat = new THREE.MeshStandardMaterial({
+        color: s.color, roughness: 0.7, metalness: 0.05, transparent: s.opacity < 1, opacity: s.opacity,
+        side: THREE.DoubleSide, depthWrite: s.opacity >= 0.5,
+      });
+      g = new THREE.Group();
+      body.shapes.forEach((shape, i) => {
+        const geo = colliderGeometry(shape);
+        const m = new THREE.Mesh(geo, mat);
+        m.position.copy(body.shapeOffsets[i]);
+        m.quaternion.copy(body.shapeOrientations[i]);
+        if (s.edges) m.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 30), edgeMat));
+        g.add(m);
+      });
+      g.userData = { mat, base: new THREE.Color(s.color) };
+    }
+    if (body.type !== CANNON.Body.STATIC) {
+      // The real collider as a wireframe on top.
+      const wire = new THREE.Group();
+      body.shapes.forEach((shape, i) => {
+        const w = new THREE.LineSegments(new THREE.EdgesGeometry(colliderGeometry(shape), 1), wireMat);
+        w.position.copy(body.shapeOffsets[i]);
+        w.quaternion.copy(body.shapeOrientations[i]);
+        w.renderOrder = 9;
+        wire.add(w);
+      });
+      g.add(wire);
+      g.userData.wire = wire;
+    }
+    g.position.copy(body.position);
+    g.quaternion.copy(body.quaternion);
+    this.group.add(g);
+    this.map.set(body, g);
+    return g;
+  }
+
+  sync() {
+    const world = this.physics.world;
+    const alive = new Set(world.bodies);
+    for (const [b, g] of this.map) {
+      if (!alive.has(b)) { this.group.remove(g); this.map.delete(b); }
+    }
+    for (const b of world.bodies) {
+      const g = this.map.get(b) ?? this.make(b);
+      if (b.type === CANNON.Body.STATIC) continue;
+      g.position.copy(b.position);
+      g.quaternion.copy(b.quaternion);
+      if (g.userData.wire) g.userData.wire.visible = this.showColliders;
+      const sleeping = b.sleepState === CANNON.Body.SLEEPING;
+      g.userData.mat.color.copy(g.userData.base).multiplyScalar(sleeping ? 0.5 : 1);
+    }
+  }
+
+  dispose() { scene.remove(this.group); this.map.clear(); }
+}
+
+// --------------------------------------------------------------- overlays
+class PointCloud {
+  constructor(color, size = 0.03, max = 4000) {
+    this.max = max;
+    this.pos = new Float32Array(max * 3);
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    this.points = new THREE.Points(this.geo, new THREE.PointsMaterial({ color, size, sizeAttenuation: true, depthTest: false }));
+    this.points.frustumCulled = false;
+    this.points.renderOrder = 10;
+    scene.add(this.points);
+  }
+  set(list) {
+    const n = Math.min(list.length, this.max);
+    for (let i = 0; i < n; i++) { this.pos[i * 3] = list[i][0]; this.pos[i * 3 + 1] = list[i][1]; this.pos[i * 3 + 2] = list[i][2]; }
+    this.geo.setDrawRange(0, n);
+    this.geo.attributes.position.needsUpdate = true;
+  }
+  set visible(v) { this.points.visible = v; }
+  dispose() { scene.remove(this.points); }
+}
+
+const markers = [];
+function marker(p, color, ttl = 1.2, radius = 0.03) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 12, 8), new THREE.MeshBasicMaterial({ color, transparent: true, depthTest: false }));
+  m.position.set(p.x, p.y, p.z);
+  m.renderOrder = 11;
+  scene.add(m);
+  markers.push({ m, ttl, life: ttl });
+}
+function updateMarkers(dt) {
+  for (let i = markers.length - 1; i >= 0; i--) {
+    const k = markers[i];
+    k.life -= dt;
+    k.m.material.opacity = Math.max(0, k.life / k.ttl);
+    if (k.life <= 0) { scene.remove(k.m); markers.splice(i, 1); }
+  }
+}
+function clearMarkers() { for (const k of markers) scene.remove(k.m); markers.length = 0; }
+
+let bannerTimer = 0;
+function banner(text, color, ms = 2500) {
+  const b = $('banner');
+  b.textContent = text;
+  b.style.color = color;
+  b.style.display = 'block';
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => (b.style.display = 'none'), ms);
+}
+
+// ------------------------------------------------------------- ui helpers
+function stats(rows) {
+  $('stats').innerHTML = rows.map(([k, v, cls = '']) => `<div class="k">${k}</div><div class="${cls}">${v}</div>`).join('');
+}
+function slider(id, label, min, max, step, value, fmt = (v) => v) {
+  return `<div class="row"><label for="${id}">${label}: <b id="${id}-v">${fmt(value)}</b></label>
+    <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></div>`;
+}
+function bindSlider(id, fmt, onChange) {
+  const el = $(id);
+  el.addEventListener('input', () => { $(`${id}-v`).textContent = fmt(+el.value); onChange(+el.value); });
+}
+function check(id, label, checked) {
+  return `<div class="row"><label for="${id}">${label}</label><input id="${id}" type="checkbox" ${checked ? 'checked' : ''}></div>`;
+}
+function select(id, label, options, value) {
+  return `<div class="row"><label for="${id}">${label}</label><select id="${id}">${
+    options.map(([v, text]) => `<option value="${v}" ${v === value ? 'selected' : ''}>${text}</option>`).join('')}</select></div>`;
+}
+/** Clicking a control must not leave it focused, or Space and the arrows go to it instead of the cat. */
+function releaseFocus() {
+  for (const el of $('controls').querySelectorAll('button, input, select')) {
+    el.addEventListener('change', () => el.blur());
+    el.addEventListener('click', () => { if (el.tagName === 'BUTTON' || el.type === 'checkbox') el.blur(); });
+  }
+}
+
+const keys = new Set();
+addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLSelectElement) return;
+  keys.add(e.code);
+  if (CAT_KEYS.has(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+/** The stock cannon-es settings, for side-by-side comparisons. */
+function stockTuning(t) {
+  t.physics.warmStart = 0;
+  t.physics.coulombFriction = false;
+  t.physics.restitutionThreshold = 0;
+  t.physics.maxContactsPerPair = 0;
+  t.physics.solverIterations = 20;
+  for (const m of Object.values(t.materials)) m.stiffness = 1e7;
+  return t;
+}
+
+/** Fixed-step clock: a stand-in for D's loop (120 Hz, capped steps per frame). */
+function makeClock(maxSteps = 8) {
+  let acc = 0;
+  return (dt, stepFn) => {
+    acc += dt;
+    let n = 0;
+    while (acc >= DT && n < maxSteps) { stepFn(); acc -= DT; n++; }
+    if (n === maxSteps) acc = 0; // don't spiral after a hitch
+    return n;
+  };
+}
+
+// ============================================== mode: cat & slice scene
+function playMode() {
+  const opts = { sleeping: true, colliders: false, cameraRelative: false, fracture: true, contacts: false };
+  let physics, cat, view, clock, contactsCloud, shadow;
+  let touching, lastImpact, lastSwat, stepMs, broken;
+
+  function restart() {
+    view?.dispose(); contactsCloud?.dispose(); clearMarkers();
+    physics = createPhysicsWorld({
+      allowSleep: opts.sleeping,
+      onBroken: (info) => { broken++; banner(`${info.kind} broke into ${info.pieces.length}`, '#ff7b54', 1200); },
+    });
+    spawnSliceScene(physics);
+    cat = createCat(physics, {
+      position: [0.2, tuning.cat.radius + 0.001, -0.6],
+      heading: Math.PI / 2,
+      onSwat: (hits, paw) => {
+        lastSwat = hits.length ? hits.map((h) => `${h.body.userData.kind ?? 'debris'} ${h.exitSpeed.toFixed(1)} m/s`).join(', ') : 'missed';
+        marker(paw, hits.length ? 0x6fd3ff : 0x55617a, 0.5, tuning.swat.radius * 0.5);
+      },
+    });
+    view = new PhysicsView(physics, { cat, showColliders: opts.colliders });
+    contactsCloud = new PointCloud(0xff4d6d, 0.03);
+    clock = makeClock();
+    touching = new Set();
+    lastImpact = null; lastSwat = '—'; stepMs = 0; broken = 0;
+
+    // A minimal stand-in for D's impact harvester: after each step, the
+    // solver impulse (multiplier x dt) of every body pair that was not
+    // touching the step before, as an ImpactEvent with B's material names.
+    physics.onAfterStep(() => {
+      const now = new Map();
+      for (const c of physics.world.contacts) {
+        const key = c.bi.id < c.bj.id ? c.bi.id * 1e6 + c.bj.id : c.bj.id * 1e6 + c.bi.id;
+        let e = now.get(key);
+        if (!e) now.set(key, (e = { bodyA: c.bi, bodyB: c.bj, impulse: 0, point: c.bi.position.vadd(c.ri) }));
+        e.impulse += Math.abs(c.multiplier) * DT;
+      }
+      for (const [key, e] of now) {
+        if (touching.has(key) || e.impulse < 0.02) continue;
+        e.matA = physics.materials.nameOf(e.bodyA) ?? '?';
+        e.matB = physics.materials.nameOf(e.bodyB) ?? '?';
+        lastImpact = { ...e, loudness: physics.materials.loudness(e.matA, e.matB) };
+        // Cat contacts are left out of fracture here: at 3 kg it would shatter
+        // every plate it steps on. Whether it should is A's and D's call.
+        const catPair = e.bodyA === cat.body || e.bodyB === cat.body;
+        if (opts.fracture && !catPair) physics.fracture.onImpact(e);
+      }
+      touching = new Set(now.keys());
+    });
+  }
+
+  function dropPlates() {
+    for (let i = 0; i < 5; i++) {
+      const p = physics.spawn('plate', { position: [1.2 + (Math.random() - 0.5) * 0.3, 1.5 + i * 0.15, 0.6 + (Math.random() - 0.5) * 0.3] });
+      p.body.quaternion.setFromEuler((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5);
+      p.body.aabbNeedsUpdate = true;
+    }
+  }
+
+  return {
+    title: 'Cat & slice scene',
+    setup() {
+      frameCamera([3.4, 3.6, 3.6], [0.2, 0.5, -1.4]);
+      // Drop shadow / landing marker: where the cat's ground ray lands.
+      shadow?.removeFromParent();
+      shadow = new THREE.Mesh(new THREE.CircleGeometry(tuning.cat.radius * 1.1, 24),
+        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false }));
+      shadow.rotation.x = -Math.PI / 2;
+      shadow.renderOrder = 5;
+      scene.add(shadow);
+      $('controls').innerHTML =
+        `<div class="btns"><button id="reset">Reset scene</button><button id="drop">Drop 5 plates</button>
+           <button id="stackUp">Cat onto the desk</button></div>` +
+        check('sleep', 'Body sleeping', opts.sleeping) +
+        check('fracture', 'Fracture (stand-in harvester)', opts.fracture) +
+        check('camrel', 'Camera-relative WASD', opts.cameraRelative) +
+        check('colliders', 'Show colliders (green)', opts.colliders) +
+        check('contacts', 'Show contact points', opts.contacts);
+      $('reset').onclick = restart;
+      $('drop').onclick = dropPlates;
+      $('stackUp').onclick = () => cat.teleport([0.75, SURFACES.deskTop + tuning.cat.radius + 0.001, -2.7], Math.PI);
+      $('sleep').onchange = (e) => { opts.sleeping = e.target.checked; restart(); };
+      $('fracture').onchange = (e) => { opts.fracture = e.target.checked; };
+      $('camrel').onchange = (e) => { opts.cameraRelative = e.target.checked; };
+      $('colliders').onchange = (e) => { opts.colliders = e.target.checked; view.showColliders = opts.colliders; };
+      $('contacts').onchange = (e) => { opts.contacts = e.target.checked; };
+      releaseFocus();
+      $('help').innerHTML = `<kbd>W</kbd><kbd>S</kbd> drive, <kbd>A</kbd><kbd>D</kbd> turn (or the arrows), <kbd>Space</kbd> jump,
+        <kbd>J</kbd> swat. Drag to orbit, scroll to zoom.<br>
+        The room is drawn straight from <b>A's STATIC_BOXES</b>; on the desk are B's <b>five plates, two mugs and a book</b>.
+        Meshes are round, built from each prop's visual spec; tick <b>Show colliders</b> to see the coarse 12-sided
+        colliders underneath, and the cat's two spheres.<br>
+        Try: jump onto the desk and swat the stack; walk <b>under the desk</b> or <b>through the bed skirt</b>
+        (the cat is 24 cm tall, the gaps are 26 and 28 cm); push a mug off the edge.`;
+      restart();
+    },
+    frame(dt) {
+      const input = opts.cameraRelative
+        ? cameraRelativeInput(keys, { x: controls.target.x - camera.position.x, z: controls.target.z - camera.position.z })
+        : inputFromKeys(keys);
+      cat.setInput(input);
+      const t0 = performance.now();
+      const n = clock(dt, () => physics.step());
+      if (n) stepMs = stepMs * 0.9 + ((performance.now() - t0) / n) * 0.1;
+
+      view.sync();
+      contactsCloud.visible = opts.contacts;
+      const data = physicsDebugData(physics);
+      if (opts.contacts) contactsCloud.set(data.layers.contacts.map((c) => c.point));
+
+      const p = cat.body.position;
+      const hide = hidingSpotAt(p);
+      const ground = cat.state.groundBody?.userData ?? {};
+      const below = cat.groundBelow();
+      shadow.visible = below.hit;
+      if (below.hit) {
+        shadow.position.set(below.point.x, below.point.y + 0.004, below.point.z);
+        shadow.material.opacity = 0.45 / (1 + below.height * 1.5); // fainter the higher the cat is
+      }
+      const nb = data.numbers;
+      stats([
+        ['Physics step', `${stepMs.toFixed(2)} ms`, stepMs < 2 ? 'pass' : stepMs < 4 ? 'warn' : 'fail'],
+        ['Awake / dynamic', `${nb['awake bodies']} / ${nb['dynamic bodies']}`],
+        ['Contacts · equations', `${nb.contacts} · ${nb['solver equations']}`],
+        ['Warm-started', nb['warm-started contacts']],
+        ['Cat position', `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`],
+        ['Speed · heading', `${cat.state.speed.toFixed(2)} m/s · ${((cat.heading * 180) / Math.PI).toFixed(0)}°`],
+        ['Grounded (ray)', cat.state.grounded ? `on ${ground.staticId ?? ground.kind ?? ground.debrisOf ?? 'body'}` : `no, ${below.hit ? below.height.toFixed(2) + ' m up' : 'falling'}`, cat.state.grounded ? 'pass' : 'warn'],
+        ['Hiding spot', hide ? hide.id : '—', hide ? 'pass' : ''],
+        ['Jumps · swats', `${cat.state.jumps} · ${cat.state.swats}`],
+        ['Last swat', lastSwat],
+        ['Last impact', lastImpact ? `${lastImpact.matA}|${lastImpact.matB} ${lastImpact.impulse.toFixed(2)} N·s ×${lastImpact.loudness.toFixed(2)}` : '—'],
+        ['Props · debris · broke', `${nb.props} · ${nb.debris} · ${broken}`],
+        ['Guard clamps', physics.guard.stats.clamps],
+      ]);
+    },
+    dispose() { view?.dispose(); contactsCloud?.dispose(); shadow?.removeFromParent(); clearMarkers(); cat?.dispose(); },
+  };
+}
+
+// ================================================ mode: stacking proof
+function stackMode() {
+  const opts = { solver: 'b', kind: 'plate', count: 5, guard: true, simSpeed: 24, colliders: false };
+  let scn, view, contactsCloud, finished, announced, limitRing;
+
+  function restart() {
+    view?.dispose(); contactsCloud?.dispose(); clearMarkers();
+    const t = structuredClone(tuning);
+    if (opts.solver === 'stock') stockTuning(t);
+    scn = createStackingScenario({ kind: opts.kind, count: opts.count, guard: opts.guard, tuning: t });
+    scn.setup();
+    view = new PhysicsView(scn.physics, { showColliders: opts.colliders });
+    contactsCloud = new PointCloud(0xff4d6d, 0.012);
+    finished = false; announced = false;
+  }
+
+  return {
+    title: 'Stacking proof',
+    setup() {
+      frameCamera([SLICE_LAYOUT.stack.x + 0.75, SURFACES.deskTop + 0.42, SLICE_LAYOUT.stack.z + 0.95], [SLICE_LAYOUT.stack.x, SURFACES.deskTop + 0.07, SLICE_LAYOUT.stack.z]);
+      // The drift limit as a ring on the desk around the stack axis.
+      limitRing?.removeFromParent();
+      limitRing = new THREE.Mesh(
+        new THREE.RingGeometry(tuning.props.plate.radius + STACK_LIMITS.drift, tuning.props.plate.radius + STACK_LIMITS.drift + 0.003, 96),
+        new THREE.MeshBasicMaterial({ color: 0x47d18c, side: THREE.DoubleSide }));
+      limitRing.rotation.x = -Math.PI / 2;
+      limitRing.position.set(SLICE_LAYOUT.stack.x, SURFACES.deskTop + 0.001, SLICE_LAYOUT.stack.z);
+      scene.add(limitRing);
+      $('controls').innerHTML =
+        select('solver', 'Solver', [['b', "B's solver (warm start, Coulomb)"], ['stock', 'cannon-es stock settings']], opts.solver) +
+        select('kind', 'Stack of', [['plate', 'plates'], ['book', 'books (the fallback)']], opts.kind) +
+        slider('count', 'How many', 2, 10, 1, opts.count) +
+        slider('sim', 'Sim speed (substeps / frame)', 2, 240, 2, opts.simSpeed, (v) => `${v} (${(v / 2).toFixed(0)}×)`) +
+        check('guard', "A's swept guard on", opts.guard) +
+        check('colliders', 'Show colliders (green)', opts.colliders) +
+        `<div class="btns"><button id="restart">Restart 60 s</button><button id="poke">Poke the top</button></div>`;
+      $('solver').onchange = (e) => { opts.solver = e.target.value; restart(); };
+      $('kind').onchange = (e) => { opts.kind = e.target.value; restart(); };
+      bindSlider('count', (v) => v, (v) => { opts.count = v; restart(); });
+      bindSlider('sim', (v) => `${v} (${(v / 2).toFixed(0)}×)`, (v) => { opts.simSpeed = v; });
+      $('guard').onchange = (e) => { opts.guard = e.target.checked; restart(); };
+      $('colliders').onchange = (e) => { opts.colliders = e.target.checked; view.showColliders = opts.colliders; };
+      $('restart').onclick = restart;
+      $('poke').onclick = () => {
+        const top = scn.stack[scn.stack.length - 1].body;
+        top.wakeUp();
+        top.velocity.x += 0.4;
+      };
+      releaseFocus();
+      $('help').innerHTML = `The mid-term proof, live: <b>five plates, sleeping off, 60 s</b>. It passes when the deepest
+        penetration stays under <b>2 mm</b> and no plate drifts more than <b>5 mm</b> (the green ring on the desk
+        starts 5 mm outside the plates' rim: a plate that reaches it has failed). Same scenario and numbers as the Vitest proof.<br>
+        Switch the solver to <b>cannon-es stock settings</b> to see why it needed work: the plates tremble and
+        walk across the desk. <b>Poke the top</b> to check the stack is live and not just frozen.`;
+      restart();
+    },
+    frame() {
+      if (!finished) {
+        for (let i = 0; i < opts.simSpeed; i++) {
+          if (!scn.step()) { finished = true; break; }
+        }
+      }
+      const m = scn.metrics();
+      const ok = scn.pass(m);
+      if (finished && !announced) {
+        announced = true;
+        banner(ok ? 'Stacking PASS' : 'Stacking FAIL', ok ? '#6ac47a' : '#e05a3a', 4000);
+      }
+      view.sync();
+      contactsCloud.set(physicsDebugData(scn.physics).layers.contacts.map((c) => c.point));
+      const penLimit = STACK_LIMITS.penetration * 1000, driftLimit = STACK_LIMITS.drift * 1000;
+      const within = m.maxPenetrationMm < penLimit && m.maxDriftMm < driftLimit;
+      const s = scn.world.solver.stats ?? {};
+      stats([
+        ['Time', `${m.seconds.toFixed(1)} / 60 s`],
+        ['Max penetration', `${m.maxPenetrationMm.toFixed(3)} mm (limit ${penLimit})`, m.maxPenetrationMm < penLimit ? 'pass' : 'fail'],
+        ['Max drift', `${m.maxDriftMm.toFixed(3)} mm (limit ${driftLimit})`, m.maxDriftMm < driftLimit ? 'pass' : 'fail'],
+        ['Centroid drift', `${m.centroidDriftMm.toFixed(3)} mm`],
+        ['Max tilt', `${m.maxTiltDeg.toFixed(3)}°`],
+        ['Fastest so far', `${m.maxSpeedMmPerS.toFixed(1)} mm/s`],
+        ['Sleeping', m.sleeping ? 'on' : 'off', m.sleeping ? 'warn' : 'pass'],
+        ['Contacts · equations', `${scn.world.contacts.length} · ${s.equations ?? '—'}`],
+        ['Guard clamps', m.guardClamps],
+        ['Result', finished ? (ok ? 'PASS' : 'FAIL') : within ? 'running…' : 'failing…', finished ? (ok ? 'pass' : 'fail') : within ? '' : 'fail'],
+      ]);
+    },
+    dispose() { view?.dispose(); contactsCloud?.dispose(); limitRing?.removeFromParent(); clearMarkers(); },
+  };
+}
+
+// ====================================================== mode: friction
+function frictionMode() {
+  const opts = { solver: 'b', speed: 3 };
+  const lanes = [{ mu: 0.2, material: 'plastic', z: -0.6 }, { mu: 0.5, material: 'ceramic', z: 0 }, { mu: 0.7, material: 'paper', z: 0.6 }];
+  const START_X = -3.2;
+  let physics, view, clock, books, lines, launched;
+
+  function restart() {
+    view?.dispose(); lines?.removeFromParent(); clearMarkers();
+    const t = structuredClone(tuning);
+    if (opts.solver === 'stock') stockTuning(t);
+    // One friction coefficient per lane, against the wooden slab.
+    for (const lane of lanes) {
+      const key = [lane.material, 'wood'].sort().join('|');
+      t.materialPairs[key] = { ...(t.materialPairs[key] ?? {}), friction: lane.mu, restitution: 0 };
+    }
+    const slab = { id: 'slab', center: [0, -0.05, 0], half: [4, 0.05, 1.2], material: 'wood', role: 'solid' };
+    physics = createPhysicsWorld({ tuning: t, room: { boxes: [slab], occluders: [] }, guard: false, fracture: false, allowSleep: false });
+    books = lanes.map((lane) => physics.spawn('book', { base: [START_X, 0, lane.z], dims: { material: lane.material, linearDamping: 0, angularDamping: 0 } }));
+    view = new PhysicsView(physics);
+    clock = makeClock();
+    launched = false;
+
+    // Where Coulomb's law says each one stops: v^2 / (2 mu g).
+    lines = new THREE.Group();
+    const g = Math.abs(t.physics.gravity);
+    for (const lane of lanes) {
+      const x = START_X + (opts.speed * opts.speed) / (2 * lane.mu * g);
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.002, 0.5), new THREE.MeshBasicMaterial({ color: 0x47d18c }));
+      bar.position.set(x, 0.002, lane.z);
+      lines.add(bar);
+    }
+    scene.add(lines);
+  }
+
+  return {
+    title: 'Friction',
+    setup() {
+      frameCamera([-2.9, 3.0, 4.6], [-2.9, 0, 0.3]);
+      $('controls').innerHTML =
+        select('solver', 'Solver', [['b', "B's solver (Coulomb friction)"], ['stock', 'cannon-es stock settings']], opts.solver) +
+        slider('speed', 'Launch speed (m/s)', 1, 4, 0.5, opts.speed, (v) => v.toFixed(1)) +
+        `<div class="btns"><button id="launch">Launch</button><button id="reset">Reset</button></div>`;
+      $('solver').onchange = (e) => { opts.solver = e.target.value; restart(); };
+      bindSlider('speed', (v) => v.toFixed(1), (v) => { opts.speed = v; restart(); });
+      $('launch').onclick = () => {
+        if (launched) restart();
+        for (const b of books) b.body.velocity.set(opts.speed, 0, 0);
+        launched = true;
+      };
+      $('reset').onclick = restart;
+      releaseFocus();
+      $('help').innerHTML = `Three books slide across a wooden slab with friction <b>0.2, 0.5 and 0.7</b>. The green bars are
+        where Coulomb's law says each must stop: <b>v² / (2 μ g)</b>.<br>
+        With <b>cannon-es stock settings</b> all three stop dead within millimetres: its friction limit is a force
+        applied as a per-step impulse, so at 120 Hz friction is 120 times too strong and the material table's
+        friction column does nothing. That is the second thing B's solver fixes.`;
+      restart();
+    },
+    frame(dt) {
+      clock(dt, () => physics.step());
+      view.sync();
+      const g = Math.abs(physics.tuning.physics.gravity);
+      const rows = [];
+      lanes.forEach((lane, i) => {
+        const went = books[i].body.position.x - START_X;
+        const expected = (opts.speed * opts.speed) / (2 * lane.mu * g);
+        const stopped = launched && books[i].body.velocity.length() < 0.01;
+        const err = Math.abs(went - expected) / expected;
+        rows.push([`μ ${lane.mu}: slid`, `${went.toFixed(3)} m (Coulomb ${expected.toFixed(3)})`, stopped ? (err < 0.05 ? 'pass' : 'fail') : '']);
+      });
+      rows.push(['Solver', opts.solver === 'b' ? "B's (Coulomb friction)" : 'cannon-es stock', opts.solver === 'b' ? 'pass' : 'warn']);
+      rows.push(['State', launched ? 'launched' : 'press Launch']);
+      stats(rows);
+    },
+    dispose() { view?.dispose(); lines?.removeFromParent(); clearMarkers(); },
+  };
+}
+
+// ============================================================ main loop
+const MODES = { play: playMode, stack: stackMode, friction: frictionMode };
+let mode = null;
+
+function setMode(name) {
+  mode?.dispose();
+  clearMarkers();
+  mode = MODES[name]();
+  for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('on', b.dataset.mode === name);
+  mode.setup();
+  try { localStorage.setItem('dynamicsDemoMode', name); } catch {}
+}
+for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => { setMode(b.dataset.mode); b.blur(); };
+
+let saved = null;
+try { saved = new URLSearchParams(location.search).get('mode') ?? localStorage.getItem('dynamicsDemoMode'); } catch {}
+setMode(MODES[saved] ? saved : 'play');
+
+let lastT = performance.now(), fpsFrames = 0, fpsT = 0;
+function tick() {
+  requestAnimationFrame(tick);
+  const now = performance.now();
+  const dt = Math.min((now - lastT) / 1000, 0.1);
+  lastT = now;
+  fpsFrames++; fpsT += dt;
+  if (fpsT > 0.5) { document.title = `Dynamics & Cat Demo · ${Math.round(fpsFrames / fpsT)} fps`; fpsFrames = 0; fpsT = 0; }
+  mode.frame(dt);
+  updateMarkers(dt);
+  controls.update();
+  renderer.render(scene, camera);
+}
+tick();
+
+// For poking at the demo from the console.
+window.demo = { get mode() { return mode; }, setMode, keys, tuning };
+</script>
+</body>
+</html>

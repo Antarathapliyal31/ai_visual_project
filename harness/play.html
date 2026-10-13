@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Last One Awake</title>
+<!--
+  The room in the cozy look: A's static geometry, B's props and cat, and a
+  render layer made of procedural textures (harness/look/). Everything that
+  moves is the real simulation from src/; nothing here writes to it.
+
+  Serve the repo root over HTTP (ES modules don't load from file://):
+    python3 -m http.server 8550
+  then open http://localhost:8550/harness/play.html
+-->
+<style>
+  :root { --wood-hi:#8a5526; --wood-lo:#5a3215; --wood-edge:#3a1f0b; --gold:#dba55c; --ink:#f8e7c6; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#0b0e1c;
+               font:700 19px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color:var(--ink); }
+  /* The room sits in a rounded frame, like a diorama. */
+  #stage { position:fixed; inset:14px; border-radius:34px; overflow:hidden; background:#131a33;
+           box-shadow:0 0 0 5px rgba(232,238,255,.9), 0 14px 44px rgba(0,0,0,.6); }
+  /* A light grade: the tone mapping alone leaves the wood a little flat. */
+  #stage canvas { display:block; width:100%; height:100%; filter:saturate(1.2) contrast(1.06); }
+  /* A soft darkening into the corners. */
+  #stage::after { content:""; position:absolute; inset:0; pointer-events:none; border-radius:inherit;
+                  background:radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(8,10,24,.5) 100%); }
+
+  #hud { position:fixed; top:34px; left:38px; right:38px; display:flex; gap:16px; align-items:flex-start; pointer-events:none; z-index:2; }
+  #hud .spacer { flex:1; }
+  .plaque { position:relative; display:flex; align-items:center; gap:11px; padding:9px 20px 10px 12px; border-radius:11px;
+            border:2px solid var(--gold);
+            background:
+              repeating-linear-gradient(92deg, rgba(255,220,160,.05) 0 3px, rgba(40,18,4,.07) 3px 7px),
+              linear-gradient(var(--wood-hi), var(--wood-lo));
+            box-shadow:inset 0 0 0 2px var(--wood-edge), inset 0 3px 0 2px rgba(255,214,150,.2), 0 4px 10px rgba(0,0,0,.5);
+            text-shadow:0 2px 0 rgba(40,18,4,.9); letter-spacing:.3px; white-space:nowrap; }
+  .plaque svg { width:30px; height:30px; flex:none; filter:drop-shadow(0 2px 0 rgba(40,18,4,.8)); }
+  .plaque b { font-weight:700; min-width:1.2em; display:inline-block; }
+  .pips { display:flex; gap:5px; margin-left:4px; }
+  .pips i { width:16px; height:16px; border-radius:3px; background:#3a2110; box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.45); }
+  .pips i.on { background:#f1b53a; box-shadow:inset 0 0 0 1.5px #7a4a0c, 0 0 8px rgba(255,190,70,.7); }
+  .pips i.on.hot { background:#ef6a3a; box-shadow:inset 0 0 0 1.5px #7a240c, 0 0 8px rgba(255,110,60,.8); }
+  #hint { position:fixed; left:38px; bottom:32px; font-size:13px; font-weight:600; padding:7px 14px 8px; gap:8px; opacity:.92; z-index:2; pointer-events:none; }
+  #hint kbd { font:inherit; font-size:12px; padding:1px 6px 2px; border-radius:5px; background:rgba(40,18,4,.55); border:1px solid rgba(219,165,92,.55); }
+  #toast { position:fixed; left:50%; top:104px; transform:translateX(-50%); font-size:17px; padding:9px 20px 10px; z-index:2;
+           opacity:0; transition:opacity .25s; pointer-events:none; }
+  #toast.show { opacity:1; }
+  #debugLink { position:fixed; right:38px; bottom:32px; font-size:13px; font-weight:600; padding:7px 14px 8px; z-index:2; opacity:.92;
+               color:var(--ink); text-decoration:none; }
+  #debugLink:hover { opacity:1; border-color:#f3c988; }
+  #problem { position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); z-index:3; display:none; flex-direction:column; align-items:flex-start;
+             gap:10px; max-width:min(560px, 80vw); padding:18px 24px 20px; font-size:16px; font-weight:600; line-height:1.4; white-space:normal; }
+  #problem.show { display:flex; }
+  #problem small { font-size:13px; font-weight:400; opacity:.85; word-break:break-word; }
+  #problem kbd { font:inherit; font-size:13px; padding:1px 6px 2px; border-radius:5px; background:rgba(40,18,4,.55); border:1px solid rgba(219,165,92,.55); }
+  @media (max-width: 760px) { body { font-size:15px; } .plaque svg { width:22px; height:22px; } #hint, #debugLink { display:none; } }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<div id="hud">
+  <div class="plaque">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><g fill="#f3d9a6" stroke="#5a3215" stroke-width="1.6">
+      <ellipse cx="16" cy="21" rx="7.5" ry="6"/><ellipse cx="6.5" cy="13.5" rx="3.2" ry="4"/><ellipse cx="12.5" cy="8" rx="3.2" ry="4"/>
+      <ellipse cx="19.5" cy="8" rx="3.2" ry="4"/><ellipse cx="25.5" cy="13.5" rx="3.2" ry="4"/></g></svg>
+    <span>Knocked over: <b id="knocked">0</b></span>
+  </div>
+  <div class="plaque">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><g fill="#f7efe0" stroke="#5a3215" stroke-width="1.6" stroke-linejoin="round">
+      <path d="M4 20 15 6l3 9-6 12z"/><path d="M18 12 26 8l3 14-10 5z"/><path d="M8 27l8-3 4 4z"/></g></svg>
+    <span>Broken: <b id="broken">0</b></span>
+  </div>
+  <div class="spacer"></div>
+  <div class="plaque">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><g fill="#f3d9a6" stroke="#5a3215" stroke-width="1.6" stroke-linejoin="round">
+      <path d="M5 12h6l8-7v22l-8-7H5z"/></g><g fill="none" stroke="#f3d9a6" stroke-width="2.4" stroke-linecap="round">
+      <path d="M23 11q4 5 0 10"/><path d="M26.5 7.5q7 8.500 0 17"/></g></svg>
+    <span>Noise</span>
+    <span class="pips" id="pips"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+  </div>
+</div>
+<div id="toast" class="plaque"></div>
+<a id="debugLink" class="plaque" href="dynamics-demo.html">Debug view: colliders and proofs &rarr;</a>
+<div id="problem" class="plaque">
+  <span>The room didn't load.</span>
+  <span>Hard-reload this page: <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> (Ctrl+Shift+R on Windows). The local server sends no cache headers, so the browser may be running older copies of the game's files.</span>
+  <small id="problemDetail"></small>
+</div>
+<script>
+  // Module scripts fail silently on screen (a stale cached file is enough),
+  // so say so instead of leaving an empty frame.
+  (function () {
+    function problem(detail) {
+      if (window.game) return;
+      document.getElementById('problem').classList.add('show');
+      if (detail) document.getElementById('problemDetail').textContent = detail;
+    }
+    addEventListener('error', function (e) { problem(e.message || (e.target && e.target.src) || ''); }, true);
+    addEventListener('unhandledrejection', function (e) { problem(String(e.reason && e.reason.message || e.reason || '')); });
+    addEventListener('load', function () { setTimeout(function () { problem(''); }, 6000); });
+  })();
+</script>
+<div id="hint" class="plaque">
+  <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span><span><kbd>Space</kbd> jump</span><span><kbd>J</kbd> swat</span>
+  <span><kbd>N</kbd> 3 a.m.</span><span><kbd>R</kbd> reset</span><span><kbd>H</kbd> home view</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span>scroll to zoom</span><span id="fps"></span>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { tuning } from '../src/core/tuning.js';
+import { ROOM, hidingSpotAt } from '../src/collision/index.js';
+import { createPhysicsWorld, spawnRoomScene } from '../src/physics/index.js';
+import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
+import { buildRoom } from './look/room.js';
+import { createPropLook } from './look/propMeshes.js';
+import { createCatMesh } from './look/catMesh.js';
+import { createLights } from './look/lights.js';
+import { createPipeline, applyEnvironment } from './look/pipeline.js';
+import { softShadow } from './look/textures.js';
+
+const DT = tuning.physics.fixedStep;
+const $ = (id) => document.getElementById(id);
+const stage = $('stage');
+
+// --------------------------------------------------------------- renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const lights = createLights(scene, renderer);
+
+// Isometric, orthographic: the view the game is designed around. The frame
+// is fitted to the floor plus this much wall, so the room fills it and the
+// tops of the walls run off the top, as in the reference.
+const FIT_WALL = 1.75, FIT_MARGIN = 0.25; // m
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 80);
+const controls = new OrbitControls(camera, renderer.domElement);
+const HOME = { target: [0, FIT_WALL / 2, 0], offset: [15, 12.4, 15], zoom: 1.18 };
+const FOLLOW = 0.35;                  // share of the cat's movement the view follows
+const follow = new THREE.Vector3();   // this frame's drift
+const followed = new THREE.Vector3(); // drift so far
+function homeCamera() {
+  followed.set(0, 0, 0);
+  controls.target.set(...HOME.target);
+  camera.position.set(HOME.target[0] + HOME.offset[0], HOME.target[1] + HOME.offset[1], HOME.target[2] + HOME.offset[2]);
+  camera.zoom = HOME.zoom;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+controls.enableDamping = true;
+controls.minZoom = 0.8;
+controls.maxZoom = 4.5;
+// A diorama, not a free camera: it turns a little either way and tilts a little.
+controls.minAzimuthAngle = Math.PI / 4 - 0.5;
+controls.maxAzimuthAngle = Math.PI / 4 + 0.5;
+controls.minPolarAngle = 0.7;
+controls.maxPolarAngle = 1.12;
+
+const pipeline = createPipeline(renderer, scene, camera);
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  pipeline.setSize(w, h);
+  const aspect = w / h;
+  // What the room needs on screen from the home view: the floor's diagonal
+  // across, and the floor's depth plus the wall up.
+  const elevation = Math.atan2(HOME.offset[1], Math.hypot(HOME.offset[0], HOME.offset[2]));
+  const diagonal = (ROOM.maxX - ROOM.minX + ROOM.maxZ - ROOM.minZ) / Math.SQRT2;
+  const needW = diagonal + 2 * FIT_MARGIN;
+  const needH = diagonal * Math.sin(elevation) + FIT_WALL * Math.cos(elevation) + 2 * FIT_MARGIN;
+  const height = Math.max(needH, needW / aspect);
+  camera.top = height / 2; camera.bottom = -height / 2;
+  camera.left = (-height * aspect) / 2; camera.right = (height * aspect) / 2;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+homeCamera();
+
+// ------------------------------------------------------------------- room
+const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy() });
+scene.add(room.group);
+const meshFor = createPropLook(room.materials);
+
+// A soft blob under the cat: where it is, and where it will land.
+const catShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ map: softShadow({ strength: 0.6 }), transparent: true, depthWrite: false, toneMapped: false }));
+catShadow.userData.noAO = true;
+catShadow.rotation.x = -Math.PI / 2;
+catShadow.renderOrder = 4;
+scene.add(catShadow);
+
+// ------------------------------------------------------------- simulation
+let physics, cat, catMesh, views, homes, touching, broken, noise, night = false;
+
+function toast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove('show'), 1500);
+}
+
+function reset() {
+  if (views) for (const mesh of views.values()) scene.remove(mesh);
+  if (catMesh) scene.remove(catMesh.group);
+  physics = createPhysicsWorld({ onBroken: (info) => { broken++; toast(`${info.kind[0].toUpperCase()}${info.kind.slice(1)} smashed`); } });
+  const sceneProps = spawnRoomScene(physics);
+  cat = createCat(physics, { position: [0.3, tuning.cat.radius + 0.001, 0.9], heading: -0.6 }); // facing the viewer
+  catMesh = createCatMesh(cat.dims);
+  applyEnvironment(catMesh.group, lights.mood.env);
+  scene.add(catMesh.group);
+  views = new Map();
+  // Where everything started, to count what the cat has knocked over.
+  homes = new Map(sceneProps.all.map((p) => [p.body, p.body.position.clone()]));
+  touching = new Set();
+  broken = 0;
+  noise = 0;
+
+  // A stand-in for D's impact harvester, enough to drive fracture and the
+  // noise pips: the solver impulse (multiplier x dt) of every body pair that
+  // was not touching the step before, weighted by B's loudness table.
+  physics.onAfterStep(() => {
+    const now = new Map();
+    for (const c of physics.world.contacts) {
+      const key = c.bi.id < c.bj.id ? c.bi.id * 1e6 + c.bj.id : c.bj.id * 1e6 + c.bi.id;
+      let e = now.get(key);
+      if (!e) now.set(key, (e = { bodyA: c.bi, bodyB: c.bj, impulse: 0 }));
+      e.impulse += Math.abs(c.multiplier) * DT;
+    }
+    for (const [key, e] of now) {
+      // Skip resting contacts, and the moment everything is first set down.
+      if (touching.has(key) || e.impulse < 0.03 || physics.stepCount < 60) continue;
+      const loudness = physics.materials.loudness(physics.materials.nameOf(e.bodyA) ?? 'wood', physics.materials.nameOf(e.bodyB) ?? 'wood');
+      noise = Math.min(1, Math.max(noise, (Math.log10(1 + e.impulse * 6) * loudness) / 1.8));
+      // The cat's own paws don't smash crockery here; whether they should is A's and D's call.
+      if (e.bodyA !== cat.body && e.bodyB !== cat.body) physics.fracture.onImpact(e);
+    }
+    touching = new Set(now.keys());
+  });
+}
+
+function setNight(on) {
+  night = on;
+  const mood = lights.setMood(night ? 'night' : 'evening');
+  room.setNight(night);
+  pipeline.setBackdrop(mood.backdrop[0], mood.backdrop[1]);
+  applyEnvironment(scene, mood.env);
+}
+
+// ------------------------------------------------------------------ input
+const keys = new Set();
+addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (CAT_KEYS.has(e.code)) e.preventDefault();
+  if (e.code === 'KeyN') setNight(!night);
+  if (e.code === 'KeyR') reset();
+  if (e.code === 'KeyH') homeCamera();
+  if (e.code === 'KeyP') { pipeline.enabled = !pipeline.enabled; toast(pipeline.enabled ? 'Full lighting' : 'Plain render'); }
+  if (e.code === 'KeyB') { pipeline.paint.enabled = !pipeline.paint.enabled; toast(pipeline.paint.enabled ? 'Painted' : 'Unpainted'); }
+});
+addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+// ------------------------------------------------------------------- loop
+const up = new THREE.Vector3();
+let acc = 0, sceneTime = 0;
+
+/** One rendered frame's worth of simulation and mesh updates. */
+function frame(dt) {
+  cat.setInput(inputFromKeys(keys));
+  // Fixed 120 Hz steps, capped: a stand-in for D's loop.
+  acc += dt;
+  let n = 0;
+  while (acc >= DT && n < 8) { physics.step(); acc -= DT; n++; }
+  if (n === 8) acc = 0;
+
+  // Props and debris: add meshes for new bodies, drop the ones that are gone.
+  const live = new Set();
+  for (const list of [physics.props, physics.debris]) {
+    for (const record of list) {
+      live.add(record.body);
+      let mesh = views.get(record.body);
+      if (!mesh) {
+        mesh = meshFor(record);
+        applyEnvironment(mesh, lights.mood.env);
+        views.set(record.body, mesh);
+        scene.add(mesh);
+      }
+      mesh.position.copy(record.body.position);
+      mesh.quaternion.copy(record.body.quaternion);
+      if (record.kind === 'lamp') lights.tuneLamp(mesh);
+    }
+  }
+  for (const [body, mesh] of views) {
+    if (!live.has(body)) { scene.remove(mesh); views.delete(body); }
+  }
+
+  catMesh.update(dt, cat, { low: hidingSpotAt(cat.body.position) !== null });
+  room.update((sceneTime += dt));
+
+  // The view drifts most of the way with the cat, so a close view never loses it.
+  follow.set(cat.body.position.x * FOLLOW, Math.max(0, cat.body.position.y - cat.dims.radius) * 0.35, cat.body.position.z * FOLLOW).sub(followed);
+  follow.multiplyScalar(Math.min(1, dt * 3.5));
+  camera.position.add(follow);
+  controls.target.add(follow);
+  followed.add(follow);
+  const below = cat.groundBelow();
+  catShadow.visible = below.hit;
+  if (below.hit) {
+    const spread = 0.42 + below.height * 0.35;
+    catShadow.position.set(below.point.x, below.point.y + 0.012, below.point.z);
+    catShadow.scale.set(spread * 1.25, spread, 1);
+    catShadow.rotation.z = cat.heading;
+    catShadow.material.opacity = 1 / (1 + below.height * 1.4);
+  }
+
+  // HUD.
+  let knocked = 0;
+  for (const p of physics.props) {
+    const home = homes.get(p.body);
+    if (!home) continue;
+    up.set(0, 1, 0).applyQuaternion(p.body.quaternion);
+    if (p.body.position.distanceTo(home) > 0.25 || up.y < 0.64) knocked++;
+  }
+  knocked += homes.size - physics.props.filter((p) => homes.has(p.body)).length; // smashed ones count too
+  $('knocked').textContent = knocked;
+  $('broken').textContent = broken;
+  noise *= Math.exp(-dt / 1.6);
+  const lit = Math.ceil(noise * 6 - 0.02);
+  [...$('pips').children].forEach((pip, i) => { pip.className = i < lit ? (i >= 4 ? 'on hot' : 'on') : ''; });
+}
+
+reset();
+setNight(false);
+
+// The full lighting is the expensive part. If this machine can't hold it,
+// step down: fewer pixels first, then the plain render.
+const QUALITY = [() => renderer.setPixelRatio(Math.min(devicePixelRatio, 1.15)), () => renderer.setPixelRatio(1), () => { pipeline.enabled = false; }];
+let quality = 0, fpsFrames = 0, fpsTime = 0, slowFor = 0;
+function watchFrameRate(elapsed) {
+  fpsFrames++;
+  fpsTime += elapsed;
+  if (fpsTime < 0.5) return;
+  const fps = fpsFrames / fpsTime;
+  $('fps').textContent = `${Math.round(fps)} fps`;
+  slowFor = fps < 40 && document.visibilityState === 'visible' ? slowFor + fpsTime : 0;
+  fpsFrames = fpsTime = 0;
+  if (slowFor >= 2.5 && quality < QUALITY.length) {
+    QUALITY[quality++]();
+    resize();
+    slowFor = 0;
+    toast('Lighter rendering for this machine');
+  }
+}
+
+let last = performance.now();
+function tick() {
+  requestAnimationFrame(tick);
+  const now = performance.now();
+  watchFrameRate((now - last) / 1000);
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  frame(dt);
+  controls.update();
+  pipeline.render();
+}
+tick();
+
+// For driving the page from the console and from automated checks.
+window.game = {
+  get physics() { return physics; }, get cat() { return cat; }, keys, camera, controls, renderer, scene,
+  frame, reset, setNight, homeCamera,
+  pipeline,
+  render() { controls.update(); pipeline.render(); },
+};
+</script>
+</body>
+</html>
