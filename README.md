@@ -29,7 +29,7 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 Three course pillars, each anchored to real work in our code:
 
-- **Physics & Dynamics.** Material table (ceramic, wood, paper, plastic, fabric, cat) drives friction, restitution, loudness, and break impulse. Solver iterations and sleep thresholds are tuned to keep a stack of five plates stable. We use `cannon-es` for integration and contact resolution.
+- **Physics & Dynamics.** Material table (ceramic, wood, paper, plastic, fabric, cat) drives friction, restitution, loudness, and break impulse. `cannon-es` integrates the bodies and builds the contact equations; our own Gauss-Seidel pass solves them with warm starting and Coulomb friction, which is what keeps a stack of five plates still and makes the friction column mean something.
 - **Collision Detection.** Our own uniform spatial-grid broad phase plugged into `cannon-es`. Ray-vs-AABB and ray-vs-box queries drive the owner's line-of-sight and the cat's ledge checks. A swept-sphere tunneling guard, gated at 1 cm of motion per substep (about 1.2 m/s), stops fast swatted mugs from passing through thin shelves.
 - **NPC AI / Behavior Trees.** Wake-state machine (asleep → stirring → sitting up → standing → awake) driven by the noise meter. Once standing, a behavior tree investigates the last noise, searches, checks hiding spots, and returns to bed.
 
@@ -102,10 +102,79 @@ Per the contracts table, static geometry comes from A and feeds the broadphase, 
 
 ---
 
+## What's built so far by Rushi: dynamics and cat (Workstream B, as of Oct 12)
+
+Workstream B is on the `Rushi` branch, in `src/physics/` and `src/player/`. It's plain JS on top of cannon-es and A's collision layer, with no Three.js, so it runs headless. **The W1 and W2 tasks are implemented, the Stacking proof passes, and W3's room clusters are in.** `npm test` now runs 211 tests across 18 files (A's 56 plus 155 for B).
+
+**Working:**
+- **Physics world wrapper** (`createPhysicsWorld`). One cannon-es world set up from `tuning.js`. It installs A's grid broadphase, swept guard, static room and fracture once, and exposes one `step()` that advances a single 120 Hz substep.
+- **Contact solver** (`WarmGSSolver`). Replaces cannon-es's Gauss-Seidel pass; cannon-es still builds the contacts and integrates. It adds warm starting, Coulomb friction, a restitution threshold and contact reduction (6 points per body pair). Each can be switched off in the overlay, and with all of them off it reproduces the stock solver step for step.
+- **Material table** (`createMaterialTable`). Seven materials (the six planned plus `plaster` for A's walls), each with friction, restitution, loudness, break impulse and contact stiffness, and per-pair overrides. One cannon `ContactMaterial` per pair.
+- **Prop factories** for plate, mug and book (`physics.spawn(kind, ...)`). Each returns its body with a plain `visual` spec made from the collider's own dimensions, for D's meshes. Colliders are coarse (12 sides), meshes are round.
+- **Slice scene** (`spawnSliceScene`): five plates, two mugs and a book on A's desk.
+- **Room clusters** (`spawnRoomScene`): the slice scene plus a filled bookshelf, two lamps, a monitor and keyboard, an alarm clock, a pillow, four plants, yarn balls and cushions, and a mug and books on the coffee table. 78 props in all, placed from `STATIC_BOXES` and `SURFACES` so they follow the furniture, and seeded so every run sees the same room. New prop kinds: `lamp`, `pot`, `pillow`, `clock`, `ball`, `monitor`, `keyboard`.
+- **Cat controller** (`createCat`). A dynamic body with fixed rotation, 24 cm tall, built from two spheres. Car-style steering as in "How to play", or camera-relative via `move`. Ground check by three of A's rays, jump with coyote time and input buffering.
+- **`swat(target, direction, speed)`**, capped at 12 m/s, and the cat's paw volume that calls it. Nothing is swatted through a wall or shelf.
+- **Stacking scenario** (`harness/scenarios/stacking.js`), following the `Scenario` contract.
+- **Overlay data** (`physicsDebugData`, `registerPhysicsDebug`): body, contact and solver numbers, contact points, and the stack-tuning controls.
+- **Live demo page** (`harness/dynamics-demo.html`): the cat in the slice scene, the stacking proof, and a friction test. Run `python3 -m http.server 8550` in the repo root and open `http://localhost:8550/harness/dynamics-demo.html`.
+- **Playable room in the cozy look** (`harness/play.html`, with the render code in `harness/look/`): the full room with wood planks, rugs, lamps and a wooden HUD, after a reference picture of a warm, cluttered isometric room. Same server, `http://localhost:8550/harness/play.html`. `N` switches between a lamp-lit evening and 3 a.m., `B` the painted brush on and off, `P` between full and plain lighting, `H` resets the view.
+
+**Measured results:**
+- **Stacking, five plates, sleeping off, 60 s:** deepest penetration 0.07 mm (limit 2 mm), largest plate drift 0.02 mm (limit 5 mm), measured from the first step after spawning with no settle period. The numbers are identical with A's guard on and off, and identical in Node and Chrome.
+- **The same scenario with cannon-es's stock solver settings fails:** 130 mm of drift. The stock pass starts from zero every step, and a stack of three or more plates never converges in 20 passes, so it trembles at about 0.1 m/s and walks.
+- **Ten messy stacks** (plates up to 1 cm off centre, any yaw, 20 s each) all stay inside the limits; the worst is 0.08 mm and 0.03 mm. Five books pass the full 60 s too (0.23 mm, 0.31 mm), so the stack stays plates.
+- **Friction now follows Coulomb's law.** A box sliding at 3 m/s stops within about 2% of v² / (2μg) for μ = 0.2, 0.5 and 0.7. With the stock solver it stops within 3 mm whatever μ is: cannon-es applies its friction limit, a force, to the per-step impulse, so at 120 Hz friction is 120 times too strong.
+- **Tunneling still holds in B's world.** 100 swats at 12 m/s with the real `swat()`, B's solver and the soft ceramic contacts: 0 pass-throughs with the guard on, 22 with it off, the same as A's own numbers.
+- **Cat:** jump apex 1.10 m (the desk is 0.94 m). It fits under the desk and the bed; a 28 cm cat is stopped by the desk panel.
+- **The full room, 78 props:** nothing moves a millimetre in 10 s with sleeping off, and with sleeping on every prop is asleep within 2 s, so the room costs nothing until the cat touches it.
+- **60 awake bodies in a heap:** about 3.6 ms per step in Node, the same as the stock solver. About 0.9 ms of that is the solver; the rest is cannon-es's narrowphase.
+- **A's 400-body scenario** with B's solver swapped in: about 120 bodies still awake once settled instead of 227, and about 2.7 ms per step instead of 8 to 9 ms. Much of the "never fall asleep" problem was the stock solver's trembling.
+
+### Using `src/physics/` and `src/player/` (read before integrating)
+
+Import from `src/physics/index.js` and `src/player/index.js`.
+
+1. **Make the world with `createPhysicsWorld()` and step it with `physics.step()`.** Nothing else calls `world.step()`. The wrapper already does A's rules 1, 4 and 6: one broadphase and guard per world, breakables registered with the table's break impulses, and fracture flushed after each step. *(D)*
+2. **Hook the harvester with `physics.onAfterStep(fn)`.** It runs after `world.step()` and before the fracture flush, so an `ImpactEvent` fed to `physics.fracture.onImpact()` there breaks the prop the same step. Controllers go in `physics.onBeforeStep(fn)`. Don't set velocities in cannon's own `preStep` event: it fires after the solver. *(D, C)*
+3. **Read impulses as `multiplier × dt` from `world.contacts`, summed per body pair.** Only 6 contact points per pair carry impulse; the others read 0, and the pair's sum is unchanged. *(D)*
+4. **Take loudness from the table:** `physics.materials.loudness(matA, matB)`, with `physics.materials.nameOf(body)` for the names. *(D)*
+5. **Build meshes from `prop.visual`**, and debris meshes from `physics.debris[i].visual`. `physics.props` and `physics.debris` are the live lists. The cat's body yaw is its heading, so a cat model facing +x needs no special case; `cat.dims` has the collider size and `cat.groundBelow()` the point for a drop shadow. *(D)*
+6. **Place props with `base: [x, surfaceY, z]`**, not by hand. Props are spawned 10 microns into what they rest on so every contact exists on the first step. A positive gap makes a stack drop like an accordion: the top plate of five arrives at 0.4 m/s and 5 mm deep. *(everyone)*
+7. **Don't raise ceramic or paper stiffness to "fix" a soft-looking contact.** The light stackable materials are soft on purpose (a resting plate sinks tens of microns) so their contact points stay in contact every step. Stiff contacts are why the stock stack flickers. *(everyone)*
+8. **Feed the cat with `cat.setInput(inputFromKeys(keys))`,** where `keys` is the set of `KeyboardEvent.code` values held. `J` is mapped to swat until the controls are settled. For sight rays, pass `skip: cat.body`. *(D, C)*
+
+### The look (`harness/look/`): a prototype for D to adopt
+
+`harness/play.html` draws the room in the style of the reference picture: an orthographic isometric view that follows the cat, procedural textures (no image files), one shadow-casting light, lamps as point lights, and a wooden HUD. It is render-side only and reads the simulation without writing to it.
+
+- **What makes it look lit, not modelled** (`look/pipeline.js`): an environment map for reflections on glaze and varnish, ambient occlusion for the dark creases and contact shadows, and a little bloom on the lamps. `P` switches to the plain render; the page also steps the quality down by itself if the frame rate stays under 40.
+- **What makes it look painted** (`look/pipeline.js`, `look/textures.js`): a brush filter over the finished picture (a Kuwahara filter turned to a wandering stroke direction: flat areas become dabs, edges stay), a faint canvas tooth under it, and loose brush strokes painted into the wall, wood and floor textures. `B` switches the brush off to compare.
+- **Furniture that is more than a box** (`look/furniture.js`): the leather couch, the coffee table, the aquarium with its fish, the desk chair and the cat tree are each built from the static box they stand for, within a few centimetres of it.
+- **The room is drawn in few pieces.** Everything still and opaque is merged into one mesh per material when the room is built, which cut the draw calls from 975 to 425 per frame.
+- **Broken things are drawn as what they are, not as their colliders** (`look/propMeshes.js`). A's plate wedges become sectors of the real plate with ragged break lines and matte break faces; a mug's two box halves become curved pieces of its wall (one keeps the handle) and its base a ragged foot. The colliders are still A's. For this, `physics.debris` records carry `index` (the piece's place in A's pre-cut) and `parentSerial` (the prop it came from).
+- **The cat** (`look/catMesh.js`) is modelled round the collider: shaped body and head, eyes, ears, whiskers, ringed tail, and a tabby coat painted from each point's place on the body. It stays inside the collider's height, so it still fits the hiding spots.
+
+- **It lives in `harness/` because `src/render/` and `src/ui/` are D's.** If D adopts it, the modules move to `src/render/` as they are: `room.js` builds every mesh from `STATIC_BOXES` and `OCCLUDERS`, `propMeshes.js` from each prop's `visual` spec, `catMesh.js` from `cat.dims`.
+- **Furniture it has never heard of still gets dressed**, by its material name (wood or cloth). So a couch or coffee table added to A's store shows up without touching the look.
+- **Dressing has no colliders:** rugs, pictures, the window, drawer fronts, the blanket. Anything that should stop the cat belongs in A's static geometry, not in `harness/look/`.
+- **The HUD numbers are B's only.** "Knocked over" and "Broken" come from the physics state. "Noise" is a stand-in fed by contact impulses and the loudness table; it is not D's wake meter, and the page has no owner or wake logic.
+- **python's `http.server` sends no cache headers**, so after pulling new code Chrome may keep running old modules. Hard-reload (Cmd+Shift+R) if the page looks stale.
+
+### Changed for other workstreams, and still open
+
+- **`src/core/tuning.js` (D's stub)** gained B's blocks: solver numbers in `physics`, plus `materials`, `materialPairs`, `props`, `cat` and `swat`. A's `collision` block is untouched.
+- **Furniture added to A's static store, for A to review.** At the team lead's request B appended a couch, a coffee table, an aquarium on a cabinet, a desk chair and a cat tree to `STATIC_BOXES` in `src/collision/staticGeometry.js` (19 boxes, the chair's four sharing one `rotY`), and seven heights to `SURFACES`. Nothing that was there moved, the hiding volumes and their check points are untouched (the chair stands clear of the under-desk check point), and A's 56 tests pass unchanged. This is the concept-art layout plus the "missing furniture" the layout proposal above already expected; it still wants Dharm's eye, and C should know the couch and chair are now in the owner's way.
+- **`swat()` has landed** (A's rule 8). On a resting target it gives bit-for-bit the velocity `stubSwat()` does, so `harness/scenarios/tunneling.js` can switch its import with no change to its numbers. That file is A's, so it hasn't been touched.
+- **Open: should the cat itself break things?** The cat is 3 kg. Walking into a plate lying on the floor delivers about 2.4 N·s to it, and landing on one from a jump about 6.7 N·s; a plate breaks at 0.7. If the harvester feeds cat contacts to fracture, the cat shatters every plate it steps on. A and D need to pick: skip `CAT` pairs for fracture, or keep it as a feature.
+- **Known limits.** The cat sinks up to 1.6 cm into the floor for a frame or two when it lands a full jump, and 0.8 cm into a wall at full speed: cannon-es has no speculative contacts, and A's guard only steps in for real tunneling. A stack of 12 plates holds for 60 s at the default 30 solver passes; 15 does not.
+
+---
+
 ## Tech stack
 
 - **Three.js** (WebGL) for rendering, fixed isometric camera, shadow maps
-- **cannon-es** for rigid-body integration and impulse-based contact resolution
+- **cannon-es** for rigid-body integration, the narrow phase and the contact equations; our own warm-started Gauss-Seidel pass solves them
 - **Vite** for the dev build; **JavaScript ES modules**; plain HTML/CSS for the HUD
 - **Vitest** for headless unit tests of the proofs
 - **Vercel** for the live deploy (preview per PR)
@@ -161,15 +230,17 @@ The HUD shows FPS, active body count, the three mid-term test readouts, the wake
 ```
 src/
   core/        loop, event bus, tuning.js, contracts
-  physics/     world, materials, props
-  player/      cat controller, swat
+  physics/     world, solver, materials, props, slice scene, room clusters
+  player/      cat controller, swat, key mapping
   collision/   grid broadphase, rays, tunneling guard, fracture
   noise/       impact harvester, loudness, wake meter
   ai/          owner state machine, behavior tree, waypoint A*
   render/      scene, isometric camera, lights, body-to-mesh sync
   ui/          HUD, debug overlay
 harness/       test scenarios used by both the browser page and headless tests
-               (collision-demo.html: live view of the collision layer)
+               (collision-demo.html: live view of the collision layer;
+                dynamics-demo.html: live view of the dynamics and the cat;
+                play.html + look/: the playable room in the cozy look)
 tests/         Vitest suites, one per proof
 docs/          Assignment PDFs, plan, this file
 ```

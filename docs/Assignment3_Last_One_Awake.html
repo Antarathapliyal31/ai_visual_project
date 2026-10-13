@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CS 549 Assignment 3: Last One Awake</title>
+<style>
+  @page { size: Letter; margin: 0.5in 0.6in; }
+  * { box-sizing: border-box; }
+  body { font: 9.3pt/1.33 "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 14.5pt; margin: 0 0 2pt; }
+  h2 { font-size: 11pt; margin: 9pt 0 3pt; padding-bottom: 1.5pt; border-bottom: 0.75pt solid #999; }
+  h3 { font-size: 9.3pt; margin: 6pt 0 1.5pt; }
+  p { margin: 0 0 4pt; }
+  .meta { color: #333; margin-bottom: 5pt; }
+  .links { border: 0.75pt solid #999; padding: 4pt 7pt; margin: 4pt 0 2pt; }
+  .links p { margin: 0 0 1.5pt; }
+  .links p:last-child { margin: 0; }
+  .todo { background: #ffe9a8; padding: 0 2pt; font-weight: 600; }
+  code { font: 8.4pt Menlo, Consolas, monospace; }
+  ul { margin: 0 0 4pt; padding-left: 13pt; }
+  li { margin-bottom: 2pt; }
+  table { border-collapse: collapse; width: 100%; margin: 3pt 0 5pt; font-size: 8.7pt; line-height: 1.27; }
+  th, td { border: 0.5pt solid #999; padding: 2pt 4pt; vertical-align: top; text-align: left; }
+  th { background: #eee; }
+  td.s { white-space: nowrap; font-weight: 600; }
+  tr { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+</style>
+</head>
+<body>
+
+<h1>CS 549 · Assignment 3: MVP Implementation and Demo</h1>
+<p class="meta"><b>Last One Awake</b>, a 3D stealth game about a cat wrecking an apartment at 3 a.m.<br>
+Group: Rushi Patel (leader), Dharm Patel, Antara Thapliyal, Christina Ross · Mentor: Danrui Li<br>
+Pillars: Physics &amp; Dynamics, Collision Detection, NPC AI · This report describes the repository as of Oct 13, 2026.</p>
+
+<div class="links">
+  <p><b>Playable build:</b> <span class="todo">live URL to add</span> · To run it locally: clone the repo, run <code>python3 -m http.server 8550</code> in its root and open <code>localhost:8550/harness/play.html</code> (WASD to move, Space to jump, J to swat).</p>
+  <p><b>Video:</b> <span class="todo">YouTube link to add</span></p>
+  <p><b>Source:</b> https://github.com/Antarathapliyal31/ai_visual_project · The README has the run instructions; <code>npm install &amp;&amp; npm test</code> runs the 211 headless tests.</p>
+</div>
+
+<h2>1. Plan vs. Reality</h2>
+
+<p>The slice we defined in Assignment 2 was the physics-to-AI path in one corner of the room: five stacked plates, two mugs and a book on a desk, the cat, and a sleeping owner who wakes in stages from the noise of real impacts. Its hardest part was a stack that rests stably while fast swatted objects never pass through thin geometry. <b>That hard part is built and measured. The path from impacts to the owner works only in an earlier single-file version and is not yet connected to the measured physics.</b></p>
+
+<p>The code is in two pieces that have not been merged:</p>
+<ul>
+  <li><b>Modular build</b> (<code>src/</code>, <code>harness/</code>; branches <code>main</code> and <code>Rushi</code>): our collision layer (Dharm) and our dynamics, contact solver and cat (Rushi), with 211 headless tests and three browser pages. It has no owner and no wake meter.</li>
+  <li><b>Single-file MVP</b> (<code>last-one-awake-mvp.html</code>; branch <code>antara</code>; Antara): cat, props, noise model, wake meter, and an owner who stirs, sits up, stands, walks to the cat and catches it. It uses stock cannon-es and its own 12 × 12 m room, and none of the modules above. The modular build has the 7 × 6 m room from our concept art.</li>
+</ul>
+
+<h3>What made it in</h3>
+<table>
+  <tr><th style="width:33%">From the Assignment 2 MVP definition</th><th style="width:12%">Status</th><th>Evidence</th></tr>
+  <tr><td>Desk, five plates, two mugs, a book, the cat and the bed, seen through the isometric camera</td><td class="s">In</td><td>Modular build, orthographic isometric view. Physics, ray queries and renderer all read the room from one list of boxes.</td></tr>
+  <tr><td>The cat walks, jumps onto the desk and swats</td><td class="s">In</td><td>Jump apex 1.10 m (the desk is 0.94 m). Swat exit speed capped at 12 m/s. 65 tests.</td></tr>
+  <tr><td>Objects teeter, tip, fall and land on each other</td><td class="s">In</td><td>78 rigid props, seven materials. A sliding box stops within 2% of the distance Coulomb friction predicts.</td></tr>
+  <tr><td>Impacts make noise, the wake meter fills, the owner stirs, sits up and stands</td><td class="s">Single file only</td><td>Works in the single-file MVP. The modular build has no noise model and no owner.</td></tr>
+  <tr><td><b>Stacking proof.</b> Five plates, sleeping off, 60 s: penetration under 2 mm, drift under 5 mm</td><td class="s">Pass</td><td>0.07 mm and 0.02 mm, measured from the first step with no settling time. Same numbers in Node and in Chrome.</td></tr>
+  <tr><td><b>Tunneling proof.</b> 100 swats at 12 m/s into a 2 cm shelf, none pass through</td><td class="s">Pass</td><td>0 of 100 pass through with our swept-sphere guard, 22 of 100 without it. With the guard the first failure is above 100 m/s.</td></tr>
+  <tr><td><b>Coupling proof.</b> The same swat wakes the owner further from beside the bed than from the far wall</td><td class="s">Not yet</td><td>The single-file MVP's own test reads a wake level of 0.00 for both swats at its committed tuning, so it fails. The modular build has nothing to test yet.</td></tr>
+  <tr><td><b>Performance proof.</b> 60 FPS with 60 awake bodies</td><td class="s">Partly</td><td>60 FPS with 79 and with 151 awake bodies in the plain render. 50 to 53 FPS with our painted post-processing on, which triples the cost of drawing a frame. Apple M4, headless Chrome 155, 1658 × 856 pixels. Not yet run in Firefox or with the other proofs running.</td></tr>
+  <tr><td>Debug overlay, built first</td><td class="s">Changed</td><td>There is no shared overlay. Each module exports its numbers and its own demo page draws them.</td></tr>
+</table>
+
+<p><b>Built ahead of the slice</b> (Assignment 2 had scheduled these after it): fracture of plates and mugs into pre-cut pieces that keep the parent's momentum, hiding volumes with line-of-sight queries, the whole furnished room, and lighting.</p>
+
+<h3>Limits we measured</h3>
+<ul>
+  <li><b>Stack height.</b> 13 plates hold for 60 s. 14 walk off the pile (67 mm of drift).</li>
+  <li><b>Swat speed.</b> Without the guard a mug gets through the shelf at 12 m/s. With it, not until above 100 m/s.</li>
+  <li><b>Awake bodies, sleeping disabled.</b> One 120 Hz physics step takes 1.2 ms with 79 bodies, 3.3 ms with 151 and 5.6 ms with 251, and the plain render still holds 60 FPS. At 401 bodies a step takes 9.4 ms, two steps no longer fit a 16.7 ms frame, and the rate falls to 12 FPS. With sleeping on, the same render holds 60 FPS with 851 bodies at rest.</li>
+</ul>
+
+<h3>What was cut or changed</h3>
+<ul>
+  <li><b>We wrote our own contact solver, which Assignment 2 listed under "won't have".</b> With cannon-es's stock solver the five plates drift 130 mm in our test, and 84 mm in the single-file MVP's own stacking test. Its source shows two causes: it starts every step from zero impulse, so a stack of three or more plates never converges, and it applies its friction limit per step, which makes friction 120 times too strong at 120 Hz. Our 319-line replacement adds warm starting, a true Coulomb friction bound, a restitution threshold and contact reduction to six points per pair. cannon-es still builds the contacts and integrates. We did not need the fallback to books.</li>
+  <li><b>All assets are procedural.</b> Assignment 2 planned glTF models, Blender lightmaps, a Mixamo owner and a pre-rigged cat. Instead every mesh is built in code from its collider's dimensions and every texture is drawn on a canvas at load time. The repository contains no model or texture files.</li>
+  <li><b>Noise is read from impact speed, not solver impulse.</b> The single-file MVP uses each contact's approach speed. The harvester that reads the solver's impulses, which is the coupling Assignment 2 described, is not written.</li>
+  <li><b>The owner is a stand-in.</b> In the single-file MVP his stage is a threshold on the wake level and, once standing, he walks straight to the cat. The state machine, vision cone and behaviour tree are not in the repository yet.</li>
+  <li><b>No build or deploy yet.</b> No Vite project, CI or live URL. The pages are plain ES modules served from a static server.</li>
+</ul>
+
+<h2>2. AI Utility</h2>
+<ul>
+  <li><b>AI image tools for textures, and 3D generators (Meshy, Tripo, Rodin) for prop meshes: not used.</b> No AI-generated asset is in this build. Assignment 2 scheduled them after the slice, and so far code-built meshes have taken their place: a mesh made from its collider cannot disagree with it, and a broken plate can be drawn as pieces of the same profile.</li>
+  <li><b>Coding assistant (Claude Code): used heavily.</b> The collision layer and the dynamics, solver and cat code were written with it. All 14 commits of the collision layer carry its co-author line.</li>
+  <li><b>Runtime AI: none,</b> as specified.</li>
+</ul>
+<p><b>Where it saved time.</b> The plan gave the plate stack two weeks of parameter tuning. The assistant read the cannon-es solver source, found the two causes above within a day, and wrote the replacement with tests that compare it step for step against the stock solver. Most of the collision and dynamics tasks that the plan spread over Oct 12 to 28 were working by Oct 12.</p>
+<p><b>Where it cost time.</b> It does not know when it is wrong, so nothing counted until a test measured it. Two of its solver ideas did not help (one made the stack much worse) and were removed after measuring. Several of its own tests were wrong on the first run. A failing assertion on a physics body made the test runner print the whole world and run out of memory, which hid the real failure. It cannot observe frame rate in the browser tab it drives, so the painted look went in unmeasured and turned out to run 7 to 10 FPS under our target. It cannot judge whether a picture looks right: the look needed four rounds of correction from a person. Its additions to the shared room geometry still wait for that module owner's review, which our rule for AI-written collision code requires.</p>
+
+<h2>3. Roadmap to Final</h2>
+<ul>
+  <li><b>One build (planned for Oct 22).</b> A game loop in <code>src/core</code>, the impact harvester reading solver impulses, and the noise model and wake meter moved out of the single file onto the modular physics, in one room layout.</li>
+  <li><b>Owner AI.</b> The staged wake state machine, a vision cone that uses our line-of-sight queries, and the caught rule. Then the behaviour tree (investigate the last noise, search, check hiding spots, return to bed), A* over hand-placed waypoints, and hearing.</li>
+  <li><b>The two remaining proofs (planned for Oct 28).</b> Coupling, and performance with every proof running, in Chrome and Firefox. The painted pass has to cost about half of what it does now, or be off by default.</li>
+  <li><b>Game around the slice.</b> HUD with the wake meter and chaos score, round end (caught, or a 3-minute timer), the shared debug overlay, and the cat's silhouette drawn through furniture.</li>
+  <li><b>Build and deploy.</b> Vite project, CI running the headless tests, and the live URL.</li>
+  <li><b>Open physics items.</b> Whether the cat's own weight should break plates (landing on one delivers 6.7 N·s; a plate breaks at 0.7). The cat sinks up to 1.6 cm into the floor for a frame when it lands. Shard colliders are simpler than the shards we draw.</li>
+  <li><b>Only if time allows:</b> sound, difficulty settings, replay.</li>
+</ul>
+
+</body>
+</html>
