@@ -53,101 +53,9 @@
   #problem small { font-size:13px; font-weight:400; opacity:.85; word-break:break-word; }
   #problem kbd { font:inherit; font-size:13px; padding:1px 6px 2px; border-radius:5px; background:rgba(40,18,4,.55); border:1px solid rgba(219,165,92,.55); }
 
-  #ownerOverlay {
-    position: fixed;
-    right: 54px;
-    bottom: 72px;
-    width: 240px;
-    height: 180px;
-    z-index: 2;
-    pointer-events: none;
-    opacity: 0.95;
-    filter: drop-shadow(0 8px 16px rgba(0,0,0,.25));
-  }
-  #ownerOverlay .owner-bed {
-    position: absolute;
-    left: 50%;
-    bottom: 12px;
-    width: 170px;
-    height: 64px;
-    transform: translateX(-50%);
-    border-radius: 18px;
-    background: linear-gradient(180deg, #7a6a85, #5a4d69);
-    box-shadow: inset 0 0 0 6px rgba(255,255,255,.08);
-  }
-  #ownerOverlay .owner-bed::before {
-    content: "";
-    position: absolute;
-    inset: 10px 10px 8px;
-    border-radius: 12px;
-    background: #dfe5ec;
-  }
-  #ownerOverlay .owner {
-    position: absolute;
-    left: 50%;
-    bottom: 26px;
-    width: 150px;
-    height: 120px;
-    transform: translateX(-50%);
-    transition: all 0.4s ease;
-  }
-  #ownerOverlay .owner-head {
-    position: absolute;
-    left: 50%;
-    top: 0;
-    width: 34px;
-    height: 34px;
-    transform: translateX(-50%);
-    border-radius: 50%;
-    background: #ebc492;
-    box-shadow: inset -4px 0 0 rgba(0,0,0,0.08);
-  }
-  #ownerOverlay .owner-body {
-    position: absolute;
-    left: 50%;
-    top: 28px;
-    width: 92px;
-    height: 52px;
-    transform: translateX(-50%);
-    border-radius: 32px 32px 20px 20px;
-    background: linear-gradient(180deg, #d9aa6d, #b77c49);
-    box-shadow: inset -6px 0 0 rgba(0,0,0,0.08);
-  }
-  #ownerOverlay .owner-arm {
-    position: absolute;
-    top: 38px;
-    width: 36px;
-    height: 14px;
-    background: #d29d66;
-    border-radius: 12px;
-  }
-  #ownerOverlay .owner-arm.left { left: 16px; transform: rotate(18deg); }
-  #ownerOverlay .owner-arm.right { right: 16px; transform: rotate(-18deg); }
-  #ownerOverlay .owner.lying .owner-body {
-    width: 118px;
-    height: 44px;
-    top: 36px;
-    transform: translateX(-50%) rotate(12deg);
-    border-radius: 26px 26px 18px 18px;
-  }
-  #ownerOverlay .owner.lying .owner-head {
-    left: 58%;
-    top: 10px;
-    transform: translateX(-50%) rotate(8deg);
-  }
-  #ownerOverlay .owner.lying .owner-arm.left { left: 24px; top: 48px; }
-  #ownerOverlay .owner.lying .owner-arm.right { right: 24px; top: 48px; }
-  #ownerOverlay .owner.standing .owner-body {
-    width: 76px;
-    height: 68px;
-    top: 18px;
-    border-radius: 20px 20px 18px 18px;
-  }
-  #ownerOverlay .owner.standing .owner-head { top: -4px; }
-  #ownerOverlay .owner.standing .owner-arm.left { left: 10px; top: 34px; }
-  #ownerOverlay .owner.standing .owner-arm.right { right: 10px; top: 34px; }
+  #ownerOverlay { display: none; }
 
-  @media (max-width: 760px) { body { font-size:15px; } .plaque svg { width:22px; height:22px; } #hint, #debugLink { display:none; } #ownerOverlay { right: 18px; bottom: 26px; transform: scale(0.8); transform-origin: bottom right; } }
+  @media (max-width: 760px) { body { font-size:15px; } .plaque svg { width:22px; height:22px; } #hint, #debugLink { display:none; } }
 </style>
 </head>
 <body>
@@ -198,21 +106,6 @@
   <span><kbd>N</kbd> 3 a.m.</span><span><kbd>R</kbd> reset</span><span><kbd>H</kbd> home view</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span>scroll to zoom</span><span id="fps"></span>
 </div>
 
-<div id="ownerOverlay" aria-label="Owner NPC placeholder">
-  <div class="owner-bed"></div>
-  <div class="owner lying" id="ownerCharacter">
-    <div class="owner-head"></div>
-    <div class="owner-body"></div>
-    <div class="owner-arm left"></div>
-    <div class="owner-arm right"></div>
-  </div>
-  <div class="plaque" style="position:absolute; left:24px; bottom:-26px; padding:6px 10px; font-size:12px; line-height:1.2; gap:6px; pointer-events:none; z-index:3;">
-    <span>Owner</span>
-    <strong id="ownerState">asleep</strong>
-    <span id="ownerPose">lying</span>
-  </div>
-</div>
-
 <script type="importmap">
 {
   "imports": {
@@ -229,6 +122,7 @@ import { tuning } from '../src/core/tuning.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld, spawnRoomScene } from '../src/physics/index.js';
 import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
+import { createOwnerPlaceholder } from '../src/ai/index.js';
 import { buildRoom } from './look/room.js';
 import { createPropLook } from './look/propMeshes.js';
 import { createCatMesh } from './look/catMesh.js';
@@ -297,6 +191,107 @@ homeCamera();
 const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy() });
 scene.add(room.group);
 const meshFor = createPropLook(room.materials);
+
+function createOwnerInScene() {
+  const owner = createOwnerPlaceholder({ bedPosition: [-2.35, 0.72, -0.1] });
+  const group = new THREE.Group();
+  group.position.set(-2.35, 0.82, -0.1);
+  group.rotation.y = 0.08;
+
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe6c392, roughness: 0.9 });
+  const hair = new THREE.MeshStandardMaterial({ color: 0x5f4333, roughness: 1 });
+  const fabric = new THREE.MeshStandardMaterial({ color: 0xe4e3ef, roughness: 0.9 });
+  const pajama = new THREE.MeshStandardMaterial({ color: 0x8aa7e2, roughness: 0.95 });
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.28, 0.24), pajama);
+  torso.position.set(0, 0.12, 0);
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.18, 0.18), fabric);
+  chest.position.set(0.02, 0.12, 0.01);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 20), skin);
+  head.position.set(0.26, 0.33, 0);
+
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 18, 0, Math.PI * 2, 0, Math.PI / 1.8), hair);
+  hairCap.position.set(0.26, 0.36, 0);
+  hairCap.scale.set(1, 0.72, 1);
+
+  const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.12, 0.12), skin);
+  leftArm.position.set(-0.12, 0.15, 0.18);
+  const rightArm = leftArm.clone();
+  rightArm.position.z = -0.18;
+
+  const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.32, 0.14), skin);
+  leftLeg.position.set(-0.18, -0.18, 0.08);
+  const rightLeg = leftLeg.clone();
+  rightLeg.position.z = -0.08;
+
+  group.add(torso, chest, head, hairCap, leftArm, rightArm, leftLeg, rightLeg);
+  scene.add(group);
+
+  function syncPose() {
+    const pose = owner.pose;
+    const lying = pose === 'lying' || pose === 'asleep' || pose === 'stirring';
+    const standing = pose === 'standing';
+
+    if (lying) {
+      torso.rotation.z = 1.2;
+      torso.position.set(0.08, 0.1, 0);
+      head.position.set(0.38, 0.18, 0.03);
+      leftArm.position.set(-0.12, 0.16, 0.23);
+      rightArm.position.set(0.18, 0.18, -0.23);
+      leftLeg.position.set(-0.18, -0.22, 0.18);
+      rightLeg.position.set(0.18, -0.22, -0.18);
+      leftArm.rotation.z = 0.8;
+      rightArm.rotation.z = -0.8;
+      leftLeg.rotation.z = 0.6;
+      rightLeg.rotation.z = -0.6;
+      group.rotation.y = 0.12;
+    } else if (standing) {
+      torso.rotation.z = 0;
+      torso.position.set(0, 0.34, 0);
+      head.position.set(0.02, 0.68, 0);
+      leftArm.position.set(-0.42, 0.42, 0.08);
+      rightArm.position.set(0.42, 0.42, 0.08);
+      leftLeg.position.set(-0.16, -0.18, 0.06);
+      rightLeg.position.set(0.16, -0.18, 0.06);
+      leftArm.rotation.z = 0.2;
+      rightArm.rotation.z = -0.2;
+      leftLeg.rotation.z = 0.04;
+      rightLeg.rotation.z = -0.04;
+      group.rotation.y = -0.2;
+    } else {
+      torso.rotation.z = 0.45;
+      torso.position.set(0.15, 0.2, 0);
+      head.position.set(0.3, 0.38, 0);
+      leftArm.position.set(-0.14, 0.2, 0.2);
+      rightArm.position.set(0.18, 0.22, -0.2);
+      leftLeg.position.set(-0.14, -0.1, 0.12);
+      rightLeg.position.set(0.18, -0.1, -0.12);
+      leftArm.rotation.z = 0.45;
+      rightArm.rotation.z = -0.45;
+      leftLeg.rotation.z = 0.3;
+      rightLeg.rotation.z = -0.3;
+      group.rotation.y = 0.08;
+    }
+  }
+
+  syncPose();
+  return { owner, group, syncPose };
+}
+
+const sceneOwner = createOwnerInScene();
+setTimeout(() => {
+  sceneOwner.owner.setState('stirring');
+  sceneOwner.syncPose();
+}, 1600);
+setTimeout(() => {
+  sceneOwner.owner.setState('standing');
+  sceneOwner.syncPose();
+}, 3200);
+setTimeout(() => {
+  sceneOwner.owner.returnToBed();
+  sceneOwner.syncPose();
+}, 5600);
 
 const catShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
   new THREE.MeshBasicMaterial({ map: softShadow({ strength: 0.6 }), transparent: true, depthWrite: false, toneMapped: false }));
@@ -475,37 +470,6 @@ window.game = {
 };
 </script>
 
-<script type="module">
-  import { createOwnerPlaceholder } from '../src/ai/index.js';
 
-  const owner = createOwnerPlaceholder({ bedPosition: [0, 0, 0] });
-  const ownerNode = document.getElementById('ownerCharacter');
-  const stateNode = document.getElementById('ownerState');
-  const poseNode = document.getElementById('ownerPose');
-
-  function renderOwner() {
-    ownerNode.classList.remove('lying', 'standing');
-    ownerNode.classList.add(owner.pose);
-    stateNode.textContent = owner.state;
-    poseNode.textContent = owner.pose;
-  }
-
-  renderOwner();
-
-  setTimeout(() => {
-    owner.setState('stirring');
-    renderOwner();
-  }, 1600);
-
-  setTimeout(() => {
-    owner.setState('standing');
-    renderOwner();
-  }, 3200);
-
-  setTimeout(() => {
-    owner.returnToBed();
-    renderOwner();
-  }, 5600);
-</script>
 </body>
 </html>
