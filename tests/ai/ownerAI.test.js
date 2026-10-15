@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createOwnerAI, OWNER_STATES, OWNER_ACTIONS } from '../../src/ai/index.js';
+import { createOwnerAI, OWNER_STATES, OWNER_ACTIONS, createOwnerPlaceholder } from '../../src/ai/index.js';
 
 describe('owner AI state machine', () => {
   it('starts asleep in bed and remains there before noise', () => {
@@ -54,5 +54,14 @@ describe('owner AI state machine', () => {
 
     expect(ai.getState()).toBe('asleep');
     expect(ai.getTarget()).toBeNull();
+  });
+
+  it('starts lying in bed as a visual placeholder', () => {
+    const owner = createOwnerPlaceholder({ bedPosition: [0, 0.5, 0] });
+
+    expect(owner.state).toBe('asleep');
+    expect(owner.pose).toBe('lying');
+    expect(owner.position).toEqual([0, 0.5, 0]);
+    expect(owner.bedPosition).toEqual([0, 0.5, 0]);
   });
 });

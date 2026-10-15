@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Owner Placeholder Demo</title>
+  <style>
+    :root {
+      --bg: #14111c;
+      --panel: rgba(28, 23, 40, 0.94);
+      --ink: #f3e7d3;
+      --muted: #a89fb3;
+      --line: #3b3050;
+      --bed: #7c6a8d;
+      --mattress: #d8d0e8;
+      --owner: #d7a267;
+      --accent: #7fa8e0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font: 13px/1.45 system-ui, sans-serif;
+      display: grid;
+      place-items: center;
+    }
+    .scene {
+      position: relative;
+      width: min(760px, 90vw);
+      height: min(500px, 72vh);
+      background: linear-gradient(#14111c, #1a1624);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 18px 48px rgba(0,0,0,0.28);
+    }
+    .title {
+      position: absolute;
+      top: 18px;
+      left: 20px;
+      z-index: 2;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .bed {
+      position: absolute;
+      left: 50%;
+      top: 58%;
+      transform: translate(-50%, -50%);
+      width: 420px;
+      height: 180px;
+      background: var(--bed);
+      border: 3px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      box-shadow: inset 0 0 0 10px rgba(0,0,0,0.12);
+    }
+    .mattress {
+      position: absolute;
+      inset: 20px 18px 18px 18px;
+      background: var(--mattress);
+      border-radius: 14px;
+    }
+    .owner {
+      position: absolute;
+      left: 50%;
+      top: 62%;
+      width: 190px;
+      height: 100px;
+      transform: translate(-50%, -50%);
+      transition: transform 0.35s ease;
+    }
+    .owner-body {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 120px;
+      height: 62px;
+      background: var(--owner);
+      border-radius: 44px 44px 24px 24px;
+      box-shadow: inset -8px 0 0 rgba(0,0,0,0.08);
+    }
+    .owner-head {
+      position: absolute;
+      left: 50%;
+      top: 20%;
+      transform: translateX(-50%);
+      width: 42px;
+      height: 42px;
+      background: #e4b785;
+      border-radius: 50%;
+    }
+    .owner-arm {
+      position: absolute;
+      top: 52%;
+      width: 50px;
+      height: 18px;
+      background: #d4a172;
+      border-radius: 16px;
+    }
+    .owner-arm.left { left: 18%; transform: rotate(18deg); }
+    .owner-arm.right { right: 18%; transform: rotate(-18deg); }
+    .owner.lying .owner-body {
+      width: 146px;
+      height: 58px;
+      border-radius: 36px 36px 28px 28px;
+      transform: translate(-50%, -50%) rotate(8deg);
+    }
+    .owner.lying .owner-head {
+      top: 18%;
+      left: 58%;
+      transform: translateX(-50%) rotate(14deg);
+    }
+    .owner.lying .owner-arm.left { left: 13%; }
+    .owner.lying .owner-arm.right { right: 13%; }
+    .owner.standing .owner-body {
+      width: 90px;
+      height: 76px;
+      border-radius: 28px 28px 20px 20px;
+      transform: translate(-50%, -50%) rotate(0deg);
+    }
+    .owner.standing .owner-head {
+      top: -6%;
+    }
+    .status {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      z-index: 2;
+      background: rgba(17,15,22,0.8);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status strong { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <div class="scene">
+    <div class="title">Owner Placeholder</div>
+    <div class="bed">
+      <div class="mattress"></div>
+    </div>
+    <div class="owner lying" id="owner">
+      <div class="owner-head"></div>
+      <div class="owner-body"></div>
+      <div class="owner-arm left"></div>
+      <div class="owner-arm right"></div>
+    </div>
+    <div class="status">
+      <strong id="state">asleep</strong><br>
+      Pose: <span id="pose">lying</span>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createOwnerPlaceholder } from '../src/ai/index.js';
+
+    const owner = createOwnerPlaceholder({ bedPosition: [0, 0, 0] });
+    const ownerNode = document.getElementById('owner');
+    const stateNode = document.getElementById('state');
+    const poseNode = document.getElementById('pose');
+
+    function render() {
+      ownerNode.classList.remove('lying', 'standing', 'sitting');
+      ownerNode.classList.add(owner.pose);
+      stateNode.textContent = owner.state;
+      poseNode.textContent = owner.pose;
+    }
+
+    render();
+
+    setTimeout(() => {
+      owner.setState('stirring');
+      render();
+    }, 1200);
+
+    setTimeout(() => {
+      owner.setState('standing');
+      render();
+    }, 2600);
+
+    setTimeout(() => {
+      owner.returnToBed();
+      render();
+    }, 4400);
+  </script>
+</body>
+</html>
