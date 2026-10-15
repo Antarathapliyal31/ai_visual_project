@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Owner Preview</title>
+  <style>
+    html, body { margin:0; height:100%; background:#d9d6d2; overflow:hidden; }
+    #stage { width:100vw; height:100vh; }
+    canvas { display:block; width:100%; height:100%; }
+    #label {
+      position:fixed; left:18px; top:18px; z-index:10;
+      background:rgba(24,24,24,.45); color:white; border:1px solid rgba(255,255,255,.25);
+      padding:8px 12px; border-radius:10px; font: 600 14px/1.2 'Segoe UI', sans-serif; letter-spacing:.02em;
+    }
+  </style>
+</head>
+<body>
+  <div id="label">Owner asset preview</div>
+  <div id="stage"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const stage = document.getElementById('stage');
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    stage.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#d9d6d2');
+
+    const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 50);
+    camera.position.set(0.8, 1.5, 4.2);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.enablePan = false;
+    controls.target.set(0, 0.75, 0);
+
+    const hemi = new THREE.HemisphereLight('#ffffff', '#b4b2b0', 1.1);
+    scene.add(hemi);
+    const key = new THREE.DirectionalLight('#ffffff', 1.5);
+    key.position.set(2, 3, 2);
+    scene.add(key);
+
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(2.6, 64),
+      new THREE.MeshStandardMaterial({ color: '#e8e3df', roughness: 0.95, metalness: 0.02 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.95;
+    scene.add(ground);
+
+    const OWNER_ASSET_URL = '../demo/public/models/demo-avatar.glb?v=quaternius-2026-10-15';
+    const loader = new GLTFLoader();
+    loader.load(OWNER_ASSET_URL, (gltf) => {
+      const model = gltf.scene;
+      model.scale.setScalar(0.4);
+      model.rotation.y = Math.PI * 0.18;
+      model.position.y = -0.12;
+      scene.add(model);
+
+      model.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
+    }, undefined, (error) => {
+      const message = `Failed to load the imported owner asset at ${OWNER_ASSET_URL}. ${error && error.message ? error.message : String(error)}`;
+      console.error(message);
+      const panel = document.createElement('div');
+      panel.style.position = 'fixed';
+      panel.style.left = '18px';
+      panel.style.top = '18px';
+      panel.style.zIndex = '20';
+      panel.style.maxWidth = '560px';
+      panel.style.background = 'rgba(30, 20, 20, 0.85)';
+      panel.style.color = '#fff';
+      panel.style.border = '1px solid rgba(255,255,255,0.2)';
+      panel.style.padding = '10px 14px';
+      panel.style.borderRadius = '10px';
+      panel.textContent = message;
+      document.body.appendChild(panel);
+    });
+
+    function tick() {
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+    tick();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>

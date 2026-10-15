@@ -154,20 +154,22 @@ function showAssetError(message) {
 }
 
 const ownerRig = new THREE.Group();
-ownerRig.name = 'ownerRig';
+ownerRig.name = 'OwnerRig';
 ownerRig.position.set(-1.2, 0, 0.35);
 ownerRig.rotation.y = Math.PI * 0.12;
+ownerRig.visible = true;
 scene.add(ownerRig);
 
+const OWNER_ASSET_URL = '../demo/public/models/demo-avatar.glb?v=quaternius-2026-10-15';
 const ownerLoader = new GLTFLoader();
 ownerLoader.load(
-  '../demo/public/models/demo-avatar.glb',
+  OWNER_ASSET_URL,
   (gltf) => {
     const model = gltf.scene;
     model.name = 'demoAvatar';
     model.position.set(0, 0, 0);
     model.rotation.set(0, Math.PI * 0.15, 0);
-    model.scale.setScalar(0.38);
+    model.scale.setScalar(0.4);
     model.traverse((obj) => {
       if (obj.isMesh) {
         obj.castShadow = true;
@@ -175,10 +177,11 @@ ownerLoader.load(
       }
     });
     ownerRig.add(model);
+    ownerRig.visible = true;
   },
   undefined,
   (error) => {
-    showAssetError(`Failed to load the imported owner asset at ../demo/public/models/demo-avatar.glb. ${error && error.message ? error.message : String(error)}`);
+    showAssetError(`Failed to load the imported owner asset at ${OWNER_ASSET_URL}. ${error && error.message ? error.message : String(error)}`);
   }
 );
 
