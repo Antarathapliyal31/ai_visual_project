@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Last One Awake — Play</title>
+  <style>
+    :root {
+      --bg: #121019;
+      --panel: rgba(25, 19, 31, 0.9);
+      --ink: #f4ecdf;
+      --muted: #b8adbf;
+      --line: #3f3353;
+      --bed: #6a5d7a;
+      --mattress: #dfe3ef;
+      --owner: #d9a46a;
+      --owner-dark: #bc8351;
+      --accent: #7aaae8;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .scene {
+      position: relative;
+      width: min(860px, 92vw);
+      height: min(560px, 72vh);
+      background: linear-gradient(#14111c, #1d1927);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.28);
+    }
+
+    .title {
+      position: absolute;
+      top: 20px;
+      left: 22px;
+      z-index: 2;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .bed {
+      position: absolute;
+      left: 50%;
+      top: 58%;
+      transform: translate(-50%, -50%);
+      width: 460px;
+      height: 190px;
+      background: var(--bed);
+      border: 2px solid rgba(255,255,255,0.07);
+      border-radius: 18px;
+      box-shadow: inset 0 0 0 12px rgba(0,0,0,0.08);
+    }
+
+    .mattress {
+      position: absolute;
+      inset: 18px 18px 18px 18px;
+      background: var(--mattress);
+      border-radius: 14px;
+      box-shadow: inset 0 0 0 2px rgba(0,0,0,0.06);
+    }
+
+    .owner {
+      position: absolute;
+      left: 50%;
+      top: 62%;
+      width: 180px;
+      height: 120px;
+      transform: translate(-50%, -50%);
+      transition: all 0.4s ease;
+    }
+
+    .owner-head {
+      position: absolute;
+      left: 50%;
+      top: 0%;
+      transform: translateX(-50%);
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: #ebc492;
+      box-shadow: inset -4px 0 0 rgba(0,0,0,0.08);
+    }
+
+    .owner-body {
+      position: absolute;
+      left: 50%;
+      width: 110px;
+      height: 62px;
+      top: 30%;
+      transform: translateX(-50%);
+      border-radius: 44px 44px 26px 26px;
+      background: linear-gradient(180deg, var(--owner), var(--owner-dark));
+      box-shadow: inset -6px 0 0 rgba(0,0,0,0.08);
+    }
+
+    .owner-arm {
+      position: absolute;
+      width: 46px;
+      height: 16px;
+      background: #d7a26b;
+      top: 42%;
+      border-radius: 12px;
+    }
+
+    .owner-arm.left { left: 14%; transform: rotate(22deg); }
+    .owner-arm.right { right: 14%; transform: rotate(-22deg); }
+
+    .owner.lying .owner-body {
+      width: 150px;
+      height: 52px;
+      top: 38%;
+      transform: translateX(-50%) rotate(14deg);
+      border-radius: 36px 36px 22px 22px;
+    }
+
+    .owner.lying .owner-head {
+      top: 12%;
+      left: 56%;
+      transform: translateX(-50%) rotate(12deg);
+    }
+
+    .owner.lying .owner-arm.left { left: 12%; top: 48%; }
+    .owner.lying .owner-arm.right { right: 12%; top: 48%; }
+
+    .owner.sitting .owner-body {
+      width: 96px;
+      height: 64px;
+      top: 28%;
+      transform: translateX(-50%) rotate(0deg);
+    }
+
+    .owner.standing .owner-body {
+      width: 92px;
+      height: 80px;
+      top: 18%;
+      transform: translateX(-50%) rotate(0deg);
+      border-radius: 26px 26px 20px 20px;
+    }
+
+    .owner.standing .owner-head {
+      top: -8%;
+    }
+
+    .owner.standing .owner-arm.left { top: 34%; left: 10%; }
+    .owner.standing .owner-arm.right { top: 34%; right: 10%; }
+
+    .status {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      z-index: 2;
+      background: rgba(14, 12, 17, 0.76);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status strong {
+      color: var(--ink);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="scene">
+    <div class="title">Owner NPC placeholder</div>
+
+    <div class="bed">
+      <div class="mattress"></div>
+    </div>
+
+    <div class="owner lying" id="owner">
+      <div class="owner-head"></div>
+      <div class="owner-body"></div>
+      <div class="owner-arm left"></div>
+      <div class="owner-arm right"></div>
+    </div>
+
+    <div class="status">
+      <strong id="state">asleep</strong><br>
+      pose: <span id="pose">lying</span>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createOwnerPlaceholder } from '../src/ai/index.js';
+
+    const owner = createOwnerPlaceholder({ bedPosition: [0, 0, 0] });
+    const ownerNode = document.getElementById('owner');
+    const stateNode = document.getElementById('state');
+    const poseNode = document.getElementById('pose');
+
+    function render() {
+      ownerNode.classList.remove('lying', 'sitting', 'standing');
+      ownerNode.classList.add(owner.pose);
+      stateNode.textContent = owner.state;
+      poseNode.textContent = owner.pose;
+    }
+
+    render();
+
+    setTimeout(() => {
+      owner.setState('stirring');
+      render();
+    }, 1400);
+
+    setTimeout(() => {
+      owner.setState('standing');
+      render();
+    }, 3000);
+
+    setTimeout(() => {
+      owner.returnToBed();
+      render();
+    }, 5200);
+  </script>
+</body>
+</html>
