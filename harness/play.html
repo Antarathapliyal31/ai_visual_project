@@ -118,7 +118,6 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { tuning } from '../src/core/tuning.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld, spawnRoomScene } from '../src/physics/index.js';
@@ -193,119 +192,132 @@ const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy()
 scene.add(room.group);
 const meshFor = createPropLook(room.materials);
 
-async function createOwnerInScene() {
-  const owner = createOwnerPlaceholder({ bedPosition: [-2.35, 0.72, -0.1] });
+function createOwnerInScene() {
+  const owner = createOwnerPlaceholder({ bedPosition: [-2.4, 0.72, -0.1] });
   const group = new THREE.Group();
-  group.position.set(-2.35, 1.52, -0.1);
-  group.rotation.y = 0.0;
+  group.position.set(-2.4, 0.82, -0.1);
+  group.rotation.set(0, 0, 0);
   scene.add(group);
 
-  let model = null;
-  const fallback = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: 0xe6c392, roughness: 0.9 });
-  const hair = new THREE.MeshStandardMaterial({ color: 0x5f4333, roughness: 1 });
-  const fabric = new THREE.MeshStandardMaterial({ color: 0xe4e3ef, roughness: 0.9 });
-  const pajama = new THREE.MeshStandardMaterial({ color: 0x8aa7e2, roughness: 0.95 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe6c39a, roughness: 0.9, metalness: 0.02 });
+  const hair = new THREE.MeshStandardMaterial({ color: 0x4b342b, roughness: 1 });
+  const pajamas = new THREE.MeshStandardMaterial({ color: 0x8fa4df, roughness: 0.96 });
+  const sock = new THREE.MeshStandardMaterial({ color: 0xe9e9f4, roughness: 0.9 });
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.28, 0.24), pajama);
-  torso.position.set(0, 0.12, 0);
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.18, 0.18), fabric);
-  chest.position.set(0.02, 0.12, 0.01);
+  const body = new THREE.Group();
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.55, 10, 18), pajamas);
+  torso.rotation.z = Math.PI / 2;
+  torso.position.set(-0.05, 0.12, 0);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 20), skin);
-  head.position.set(0.26, 0.33, 0);
+  const hips = new THREE.Mesh(new THREE.SphereGeometry(0.17, 24, 20), pajamas);
+  hips.scale.set(1.2, 0.9, 1.1);
+  hips.position.set(-0.28, 0.06, 0);
 
-  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 18, 0, Math.PI * 2, 0, Math.PI / 1.8), hair);
-  hairCap.position.set(0.26, 0.36, 0);
-  hairCap.scale.set(1, 0.72, 1);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 28, 24), skin);
+  head.scale.set(1.06, 1.0, 0.96);
+  head.position.set(0.54, 0.12, 0);
 
-  const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.12, 0.12), skin);
-  leftArm.position.set(-0.12, 0.15, 0.18);
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.175, 24, 18), hair);
+  hairCap.scale.set(1.02, 0.72, 1.0);
+  hairCap.position.set(0.53, 0.17, 0);
+
+  const leftArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.28, 8, 14), skin);
+  leftArm.rotation.z = Math.PI / 2;
+  leftArm.position.set(0.08, 0.12, 0.28);
+
   const rightArm = leftArm.clone();
-  rightArm.position.z = -0.18;
+  rightArm.position.z = -0.28;
 
-  const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.32, 0.14), skin);
-  leftLeg.position.set(-0.18, -0.18, 0.08);
+  const leftForearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.22, 8, 14), skin);
+  leftForearm.rotation.z = Math.PI / 2;
+  leftForearm.position.set(-0.18, 0.08, 0.28);
+
+  const rightForearm = leftForearm.clone();
+  rightForearm.position.z = -0.28;
+
+  const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 16), skin);
+  leftHand.position.set(-0.35, 0.02, 0.28);
+  leftHand.scale.set(1.2, 0.9, 1.0);
+
+  const rightHand = leftHand.clone();
+  rightHand.position.z = -0.28;
+
+  const leftLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.38, 8, 15), skin);
+  leftLeg.rotation.z = Math.PI / 2;
+  leftLeg.position.set(-0.55, -0.38, 0.13);
+
   const rightLeg = leftLeg.clone();
-  rightLeg.position.z = -0.08;
+  rightLeg.position.z = -0.13;
 
-  fallback.add(torso, chest, head, hairCap, leftArm, rightArm, leftLeg, rightLeg);
-  group.add(fallback);
+  const leftFoot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 18, 16), sock);
+  leftFoot.scale.set(1.25, 0.72, 1.75);
+  leftFoot.position.set(-0.78, -0.55, 0.16);
 
-  const loader = new GLTFLoader();
-  try {
-    const gltf = await loader.loadAsync(new URL('./assets/human-female.glb', import.meta.url).href);
-    model = gltf.scene;
-    model.scale.setScalar(0.72);
-    model.rotation.set(0, 0, 0);
-    model.position.set(0, 0.8, 0);
-    group.add(model);
-    group.remove(fallback);
-  } catch (error) {
-    console.warn('Owner GLB failed to load, using fallback body.', error);
-  }
+  const rightFoot = leftFoot.clone();
+  rightFoot.position.z = -0.16;
+
+  body.add(torso, hips, head, hairCap, leftArm, rightArm, leftForearm, rightForearm, leftHand, rightHand, leftLeg, rightLeg, leftFoot, rightFoot);
+  group.add(body);
 
   function syncPose() {
     const pose = owner.pose;
     const lying = pose === 'lying' || pose === 'asleep' || pose === 'stirring';
     const standing = pose === 'standing';
 
-    if (model) {
-      model.position.set(0, 0.8, 0);
-      if (lying) {
-        group.rotation.set(0.0, 0.0, 0.0);
-        model.rotation.set(Math.PI * 0.5, 0.0, Math.PI * 0.08);
-        model.position.set(0.0, 0.82, -0.05);
-      } else if (standing) {
-        group.rotation.set(0.0, 0.0, 0.0);
-        model.rotation.set(0.0, 0.0, 0.0);
-        model.position.set(0.0, 0.82, 0.0);
-      } else {
-        group.rotation.set(0.0, 0.0, 0.0);
-        model.rotation.set(Math.PI * 0.18, 0.0, 0.3);
-        model.position.set(0.04, 0.82, 0.0);
-      }
+    body.position.set(0, 0, 0);
+    body.rotation.set(0, 0, 0);
+
+    if (lying) {
+      group.position.set(-2.4, 0.86, -0.1);
+      group.rotation.set(0, 0, Math.PI / 2);
+      body.rotation.set(0.0, 0.0, 0.0);
+      torso.position.set(-0.05, 0.12, 0);
+      head.position.set(0.55, 0.12, 0);
+      hairCap.position.set(0.54, 0.18, 0);
+      leftArm.position.set(0.05, 0.12, 0.28);
+      rightArm.position.set(0.05, 0.12, -0.28);
+      leftForearm.position.set(-0.18, 0.08, 0.28);
+      rightForearm.position.set(-0.18, 0.08, -0.28);
+      leftHand.position.set(-0.36, 0.03, 0.30);
+      rightHand.position.set(-0.36, 0.03, -0.30);
+      leftLeg.position.set(-0.57, -0.38, 0.14);
+      rightLeg.position.set(-0.57, -0.38, -0.14);
+      leftFoot.position.set(-0.80, -0.55, 0.17);
+      rightFoot.position.set(-0.80, -0.55, -0.17);
+    } else if (standing) {
+      group.position.set(-2.4, 0.82, -0.1);
+      group.rotation.set(0, 0, 0);
+      torso.rotation.z = 0;
+      torso.position.set(0.02, 0.14, 0);
+      head.position.set(0.0, 0.8, 0);
+      hairCap.position.set(0.0, 0.88, 0);
+      leftArm.position.set(-0.42, 0.54, 0.08);
+      rightArm.position.set(0.42, 0.54, 0.08);
+      leftForearm.position.set(-0.28, 0.22, 0.10);
+      rightForearm.position.set(0.28, 0.22, 0.10);
+      leftHand.position.set(-0.58, 0.08, 0.12);
+      rightHand.position.set(0.58, 0.08, 0.12);
+      leftLeg.position.set(-0.18, -0.46, 0.06);
+      rightLeg.position.set(0.18, -0.46, 0.06);
+      leftFoot.position.set(-0.18, -0.80, 0.16);
+      rightFoot.position.set(0.18, -0.80, 0.16);
     } else {
-      if (lying) {
-        torso.rotation.z = 1.2;
-        torso.position.set(0.08, 0.1, 0);
-        head.position.set(0.38, 0.18, 0.03);
-        leftArm.position.set(-0.12, 0.16, 0.23);
-        rightArm.position.set(0.18, 0.18, -0.23);
-        leftLeg.position.set(-0.18, -0.22, 0.18);
-        rightLeg.position.set(0.18, -0.22, -0.18);
-        leftArm.rotation.z = 0.8;
-        rightArm.rotation.z = -0.8;
-        leftLeg.rotation.z = 0.6;
-        rightLeg.rotation.z = -0.6;
-        group.rotation.y = 0.12;
-      } else if (standing) {
-        torso.rotation.z = 0;
-        torso.position.set(0, 0.34, 0);
-        head.position.set(0.02, 0.68, 0);
-        leftArm.position.set(-0.42, 0.42, 0.08);
-        rightArm.position.set(0.42, 0.42, 0.08);
-        leftLeg.position.set(-0.16, -0.18, 0.06);
-        rightLeg.position.set(0.16, -0.18, 0.06);
-        leftArm.rotation.z = 0.2;
-        rightArm.rotation.z = -0.2;
-        leftLeg.rotation.z = 0.04;
-        rightLeg.rotation.z = -0.04;
-        group.rotation.y = -0.2;
-      } else {
-        torso.rotation.z = 0.45;
-        torso.position.set(0.15, 0.2, 0);
-        head.position.set(0.3, 0.38, 0);
-        leftArm.position.set(-0.14, 0.2, 0.2);
-        rightArm.position.set(0.18, 0.22, -0.2);
-        leftLeg.position.set(-0.14, -0.1, 0.12);
-        rightLeg.position.set(0.18, -0.1, -0.12);
-        leftArm.rotation.z = 0.45;
-        rightArm.rotation.z = -0.45;
-        leftLeg.rotation.z = 0.3;
-        rightLeg.rotation.z = -0.3;
-        group.rotation.y = 0.08;
-      }
+      group.position.set(-2.4, 0.85, -0.1);
+      group.rotation.set(0.0, 0.0, Math.PI * 0.52);
+      body.rotation.set(0.0, 0.0, 0.0);
+      torso.position.set(-0.04, 0.18, 0);
+      head.position.set(0.38, 0.18, 0.02);
+      hairCap.position.set(0.38, 0.22, 0.02);
+      leftArm.position.set(0.04, 0.16, 0.25);
+      rightArm.position.set(0.04, 0.16, -0.25);
+      leftForearm.position.set(-0.18, 0.12, 0.22);
+      rightForearm.position.set(-0.18, 0.12, -0.22);
+      leftHand.position.set(-0.28, 0.02, 0.26);
+      rightHand.position.set(-0.28, 0.02, -0.26);
+      leftLeg.position.set(-0.55, -0.28, 0.12);
+      rightLeg.position.set(-0.55, -0.28, -0.12);
+      leftFoot.position.set(-0.82, -0.50, 0.16);
+      rightFoot.position.set(-0.82, -0.50, -0.16);
     }
   }
 
@@ -313,7 +325,7 @@ async function createOwnerInScene() {
   return { owner, group, syncPose };
 }
 
-const sceneOwner = await createOwnerInScene();
+const sceneOwner = createOwnerInScene();
 setTimeout(() => {
   sceneOwner.owner.setState('stirring');
   sceneOwner.syncPose();
