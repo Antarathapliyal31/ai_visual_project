@@ -118,6 +118,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { tuning } from '../src/core/tuning.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld, spawnRoomScene } from '../src/physics/index.js';
@@ -192,12 +193,15 @@ const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy()
 scene.add(room.group);
 const meshFor = createPropLook(room.materials);
 
-function createOwnerInScene() {
+async function createOwnerInScene() {
   const owner = createOwnerPlaceholder({ bedPosition: [-2.35, 0.72, -0.1] });
   const group = new THREE.Group();
   group.position.set(-2.35, 0.82, -0.1);
   group.rotation.y = 0.08;
+  scene.add(group);
 
+  let model = null;
+  const fallback = new THREE.Group();
   const skin = new THREE.MeshStandardMaterial({ color: 0xe6c392, roughness: 0.9 });
   const hair = new THREE.MeshStandardMaterial({ color: 0x5f4333, roughness: 1 });
   const fabric = new THREE.MeshStandardMaterial({ color: 0xe4e3ef, roughness: 0.9 });
@@ -225,53 +229,88 @@ function createOwnerInScene() {
   const rightLeg = leftLeg.clone();
   rightLeg.position.z = -0.08;
 
-  group.add(torso, chest, head, hairCap, leftArm, rightArm, leftLeg, rightLeg);
-  scene.add(group);
+  fallback.add(torso, chest, head, hairCap, leftArm, rightArm, leftLeg, rightLeg);
+  group.add(fallback);
+
+  const loader = new GLTFLoader();
+  try {
+    const gltf = await loader.loadAsync(new URL('./assets/human-female.glb', import.meta.url).href);
+    model = gltf.scene;
+    model.scale.setScalar(0.72);
+    model.rotation.y = Math.PI * 0.5;
+    model.position.set(0, -0.12, 0);
+    group.add(model);
+    group.remove(fallback);
+  } catch (error) {
+    console.warn('Owner GLB failed to load, using fallback body.', error);
+  }
 
   function syncPose() {
     const pose = owner.pose;
     const lying = pose === 'lying' || pose === 'asleep' || pose === 'stirring';
     const standing = pose === 'standing';
 
-    if (lying) {
-      torso.rotation.z = 1.2;
-      torso.position.set(0.08, 0.1, 0);
-      head.position.set(0.38, 0.18, 0.03);
-      leftArm.position.set(-0.12, 0.16, 0.23);
-      rightArm.position.set(0.18, 0.18, -0.23);
-      leftLeg.position.set(-0.18, -0.22, 0.18);
-      rightLeg.position.set(0.18, -0.22, -0.18);
-      leftArm.rotation.z = 0.8;
-      rightArm.rotation.z = -0.8;
-      leftLeg.rotation.z = 0.6;
-      rightLeg.rotation.z = -0.6;
-      group.rotation.y = 0.12;
-    } else if (standing) {
-      torso.rotation.z = 0;
-      torso.position.set(0, 0.34, 0);
-      head.position.set(0.02, 0.68, 0);
-      leftArm.position.set(-0.42, 0.42, 0.08);
-      rightArm.position.set(0.42, 0.42, 0.08);
-      leftLeg.position.set(-0.16, -0.18, 0.06);
-      rightLeg.position.set(0.16, -0.18, 0.06);
-      leftArm.rotation.z = 0.2;
-      rightArm.rotation.z = -0.2;
-      leftLeg.rotation.z = 0.04;
-      rightLeg.rotation.z = -0.04;
-      group.rotation.y = -0.2;
+    if (model) {
+      if (lying) {
+        group.rotation.z = 0.2;
+        group.rotation.y = 0.6;
+        model.rotation.x = 0.8;
+        model.rotation.z = 1.5;
+        model.position.y = -0.28;
+      } else if (standing) {
+        group.rotation.z = 0;
+        group.rotation.y = -0.25;
+        model.rotation.x = 0;
+        model.rotation.z = 0;
+        model.position.y = -0.14;
+      } else {
+        group.rotation.z = 0.08;
+        group.rotation.y = 0.22;
+        model.rotation.x = 0.4;
+        model.rotation.z = 0.6;
+        model.position.y = -0.18;
+      }
     } else {
-      torso.rotation.z = 0.45;
-      torso.position.set(0.15, 0.2, 0);
-      head.position.set(0.3, 0.38, 0);
-      leftArm.position.set(-0.14, 0.2, 0.2);
-      rightArm.position.set(0.18, 0.22, -0.2);
-      leftLeg.position.set(-0.14, -0.1, 0.12);
-      rightLeg.position.set(0.18, -0.1, -0.12);
-      leftArm.rotation.z = 0.45;
-      rightArm.rotation.z = -0.45;
-      leftLeg.rotation.z = 0.3;
-      rightLeg.rotation.z = -0.3;
-      group.rotation.y = 0.08;
+      if (lying) {
+        torso.rotation.z = 1.2;
+        torso.position.set(0.08, 0.1, 0);
+        head.position.set(0.38, 0.18, 0.03);
+        leftArm.position.set(-0.12, 0.16, 0.23);
+        rightArm.position.set(0.18, 0.18, -0.23);
+        leftLeg.position.set(-0.18, -0.22, 0.18);
+        rightLeg.position.set(0.18, -0.22, -0.18);
+        leftArm.rotation.z = 0.8;
+        rightArm.rotation.z = -0.8;
+        leftLeg.rotation.z = 0.6;
+        rightLeg.rotation.z = -0.6;
+        group.rotation.y = 0.12;
+      } else if (standing) {
+        torso.rotation.z = 0;
+        torso.position.set(0, 0.34, 0);
+        head.position.set(0.02, 0.68, 0);
+        leftArm.position.set(-0.42, 0.42, 0.08);
+        rightArm.position.set(0.42, 0.42, 0.08);
+        leftLeg.position.set(-0.16, -0.18, 0.06);
+        rightLeg.position.set(0.16, -0.18, 0.06);
+        leftArm.rotation.z = 0.2;
+        rightArm.rotation.z = -0.2;
+        leftLeg.rotation.z = 0.04;
+        rightLeg.rotation.z = -0.04;
+        group.rotation.y = -0.2;
+      } else {
+        torso.rotation.z = 0.45;
+        torso.position.set(0.15, 0.2, 0);
+        head.position.set(0.3, 0.38, 0);
+        leftArm.position.set(-0.14, 0.2, 0.2);
+        rightArm.position.set(0.18, 0.22, -0.2);
+        leftLeg.position.set(-0.14, -0.1, 0.12);
+        rightLeg.position.set(0.18, -0.1, -0.12);
+        leftArm.rotation.z = 0.45;
+        rightArm.rotation.z = -0.45;
+        leftLeg.rotation.z = 0.3;
+        rightLeg.rotation.z = -0.3;
+        group.rotation.y = 0.08;
+      }
     }
   }
 
@@ -279,7 +318,7 @@ function createOwnerInScene() {
   return { owner, group, syncPose };
 }
 
-const sceneOwner = createOwnerInScene();
+const sceneOwner = await createOwnerInScene();
 setTimeout(() => {
   sceneOwner.owner.setState('stirring');
   sceneOwner.syncPose();
