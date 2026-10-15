@@ -123,7 +123,6 @@ import { tuning } from '../src/core/tuning.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld, spawnRoomScene } from '../src/physics/index.js';
 import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
-import { createOwnerPlaceholder } from '../src/ai/index.js';
 import { buildRoom } from './look/room.js';
 import { createPropLook } from './look/propMeshes.js';
 import { createCatMesh } from './look/catMesh.js';
@@ -145,6 +144,43 @@ stage.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const lights = createLights(scene, renderer);
+
+function showAssetError(message) {
+  const panel = document.getElementById('problem');
+  const detail = document.getElementById('problemDetail');
+  if (panel) panel.classList.add('show');
+  if (detail) detail.textContent = message;
+  console.error(message);
+}
+
+const ownerRig = new THREE.Group();
+ownerRig.name = 'ownerRig';
+ownerRig.position.set(-1.2, 0, 0.35);
+ownerRig.rotation.y = Math.PI * 0.12;
+scene.add(ownerRig);
+
+const ownerLoader = new GLTFLoader();
+ownerLoader.load(
+  '../demo/public/models/demo-avatar.glb',
+  (gltf) => {
+    const model = gltf.scene;
+    model.name = 'demoAvatar';
+    model.position.set(0, 0, 0);
+    model.rotation.set(0, Math.PI * 0.15, 0);
+    model.scale.setScalar(0.38);
+    model.traverse((obj) => {
+      if (obj.isMesh) {
+        obj.castShadow = true;
+        obj.receiveShadow = true;
+      }
+    });
+    ownerRig.add(model);
+  },
+  undefined,
+  (error) => {
+    showAssetError(`Failed to load the imported owner asset at ../demo/public/models/demo-avatar.glb. ${error && error.message ? error.message : String(error)}`);
+  }
+);
 
 const FIT_WALL = 1.75, FIT_MARGIN = 0.25;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 80);
@@ -192,74 +228,6 @@ homeCamera();
 const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy() });
 scene.add(room.group);
 const meshFor = createPropLook(room.materials);
-
-async function createOwnerInScene() {
-  const owner = createOwnerPlaceholder({ bedPosition: [-2.4, 0.72, -0.1] });
-  const group = new THREE.Group();
-  group.position.set(-2.4, 0.78, -0.1);
-  group.rotation.set(0, 0, 0);
-  scene.add(group);
-
-  const loader = new GLTFLoader();
-  const gltf = await loader.loadAsync('./assets/human-female.glb');
-  const human = gltf.scene;
-
-  human.scale.set(0.9, 0.9, 0.9);
-  human.position.set(0, 0.08, 0);
-  human.rotation.set(0, 0, 0);
-
-  human.traverse((obj) => {
-    if (obj.isMesh) {
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-      if (obj.material && 'color' in obj.material) {
-        obj.material.roughness = Math.max(0.65, obj.material.roughness ?? 0.8);
-      }
-    }
-  });
-
-  group.add(human);
-
-  function syncPose() {
-    const pose = owner.pose;
-    const lying = pose === 'lying' || pose === 'asleep' || pose === 'stirring';
-    const standing = pose === 'standing';
-
-    group.position.set(-2.4, 0.78, -0.1);
-    group.rotation.set(0, 0, 0);
-    human.position.set(0, 0.08, 0);
-    human.rotation.set(0, 0, 0);
-    human.scale.set(0.9, 0.9, 0.9);
-
-    if (standing) {
-      group.position.set(-2.4, 0.82, -0.1);
-      human.position.set(0, 0.25, 0);
-      human.rotation.set(0, 0, 0);
-      human.scale.set(1.0, 1.0, 1.0);
-    } else if (!lying) {
-      group.position.set(-2.4, 0.79, -0.1);
-      human.position.set(0, 0.12, 0.02);
-      human.rotation.set(0.08, 0.0, 0.0);
-    }
-  }
-
-  syncPose();
-  return { owner, group, syncPose };
-}
-
-const sceneOwner = await createOwnerInScene();
-setTimeout(() => {
-  sceneOwner.owner.setState('stirring');
-  sceneOwner.syncPose();
-}, 1600);
-setTimeout(() => {
-  sceneOwner.owner.setState('standing');
-  sceneOwner.syncPose();
-}, 3200);
-setTimeout(() => {
-  sceneOwner.owner.returnToBed();
-  sceneOwner.syncPose();
-}, 5600);
 
 const catShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
   new THREE.MeshBasicMaterial({ map: softShadow({ strength: 0.6 }), transparent: true, depthWrite: false, toneMapped: false }));
