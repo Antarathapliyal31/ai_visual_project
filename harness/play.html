@@ -196,8 +196,8 @@ const meshFor = createPropLook(room.materials);
 async function createOwnerInScene() {
   const owner = createOwnerPlaceholder({ bedPosition: [-2.35, 0.72, -0.1] });
   const group = new THREE.Group();
-  group.position.set(-2.35, 0.82, -0.1);
-  group.rotation.y = 0.08;
+  group.position.set(-2.35, 1.52, -0.1);
+  group.rotation.y = 0.0;
   scene.add(group);
 
   let model = null;
@@ -237,8 +237,8 @@ async function createOwnerInScene() {
     const gltf = await loader.loadAsync(new URL('./assets/human-female.glb', import.meta.url).href);
     model = gltf.scene;
     model.scale.setScalar(0.72);
-    model.rotation.y = Math.PI * 0.5;
-    model.position.set(0, -0.12, 0);
+    model.rotation.set(0, 0, 0);
+    model.position.set(0, 0.8, 0);
     group.add(model);
     group.remove(fallback);
   } catch (error) {
@@ -251,24 +251,19 @@ async function createOwnerInScene() {
     const standing = pose === 'standing';
 
     if (model) {
+      model.position.set(0, 0.8, 0);
       if (lying) {
-        group.rotation.z = 0.2;
-        group.rotation.y = 0.6;
-        model.rotation.x = 0.8;
-        model.rotation.z = 1.5;
-        model.position.y = -0.28;
+        group.rotation.set(0.0, 0.0, 0.0);
+        model.rotation.set(Math.PI * 0.5, 0.0, Math.PI * 0.08);
+        model.position.set(0.0, 0.82, -0.05);
       } else if (standing) {
-        group.rotation.z = 0;
-        group.rotation.y = -0.25;
-        model.rotation.x = 0;
-        model.rotation.z = 0;
-        model.position.y = -0.14;
+        group.rotation.set(0.0, 0.0, 0.0);
+        model.rotation.set(0.0, 0.0, 0.0);
+        model.position.set(0.0, 0.82, 0.0);
       } else {
-        group.rotation.z = 0.08;
-        group.rotation.y = 0.22;
-        model.rotation.x = 0.4;
-        model.rotation.z = 0.6;
-        model.position.y = -0.18;
+        group.rotation.set(0.0, 0.0, 0.0);
+        model.rotation.set(Math.PI * 0.18, 0.0, 0.3);
+        model.position.set(0.04, 0.82, 0.0);
       }
     } else {
       if (lying) {
