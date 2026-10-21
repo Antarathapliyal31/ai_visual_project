@@ -20,8 +20,9 @@ import { PROP } from '../../src/core/groups.js';
 import { UniformGridBroadphase } from '../../src/collision/gridBroadphase.js';
 import { makeStaticBox } from '../../src/collision/staticGeometry.js';
 import { createSweptGuard } from '../../src/collision/sweptGuard.js';
+import { swat } from '../../src/player/swat.js';
 
-const SWAT_CAP = 12; // m/s, swat() contract
+const SWAT_CAP = tuning.swat.maxSpeed; // m/s, swat() contract
 
 // The proof shelf: 2.0 m x 2 cm x 0.6 m, top face at y = 1.41.
 export const SHELF = { id: 'proofShelf', center: [0, 1.4, 0], half: [1.0, 0.01, 0.3], material: 'wood', role: 'solid' };
@@ -31,7 +32,8 @@ const MUG = { radiusTop: 0.08, radiusBottom: 0.07, height: 0.14, mass: 0.3 };
 
 /**
  * Day-one stub of B's swat(target, direction, speed): sets the velocity
- * directly, capped at 12 m/s. Replace with B's swat() once it lands.
+ * directly, capped at 12 m/s. The scenario now uses B's real swat(); this
+ * stays only as the reference B's swat tests compare against.
  */
 export function stubSwat(target, direction, speed) {
   const s = Math.min(speed, SWAT_CAP);
@@ -87,7 +89,7 @@ export function createTunnelingScenario(opts = {}) {
     // Mostly downward, up to ~10 degrees off vertical, always into the shelf.
     const dir = { x: (rand() * 2 - 1) * 0.18, y: -1, z: (rand() * 2 - 1) * 0.18 };
     if (speed <= SWAT_CAP) {
-      stubSwat(mug, dir, speed);
+      swat(mug, dir, speed);
     } else {
       // Ramp beyond the swat cap: set the velocity directly to find the failure speed.
       const len = Math.hypot(dir.x, dir.y, dir.z);

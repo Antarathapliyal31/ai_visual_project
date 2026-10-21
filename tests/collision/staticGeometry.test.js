@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as CANNON from 'cannon-es';
 import {
-  STATIC_BOXES, OCCLUDERS, HIDING_VOLUMES, buildStaticGeometry, isSolidStatic,
+  STATIC_BOXES, OCCLUDERS, HIDING_VOLUMES, ROOM, SURFACES, buildStaticGeometry, isSolidStatic,
 } from '../../src/collision/staticGeometry.js';
 import { UniformGridBroadphase } from '../../src/collision/gridBroadphase.js';
 
@@ -14,6 +14,17 @@ const overlapVolume = (a, b) => {
   }
   return v;
 };
+
+// World-space AABB of a spec, turned by its rotY.
+const worldBox = (b) => {
+  const c = Math.abs(Math.cos(b.rotY ?? 0)), s = Math.abs(Math.sin(b.rotY ?? 0));
+  const hx = b.half[0] * c + b.half[2] * s, hz = b.half[0] * s + b.half[2] * c;
+  return {
+    min: [b.center[0] - hx, b.center[1] - b.half[1], b.center[2] - hz],
+    max: [b.center[0] + hx, b.center[1] + b.half[1], b.center[2] + hz],
+  };
+};
+const SHELL = new Set(['floor', 'wallWest', 'wallNorth', 'boundaryEast', 'boundarySouth']);
 
 describe('static geometry store', () => {
   it('has unique ids', () => {
@@ -67,6 +78,41 @@ describe('static geometry store', () => {
     grid.collisionPairs(world, p1, p2);
     const touched = [...p1, ...p2];
     for (const o of occluders) expect(touched).not.toContain(o);
+  });
+
+  it('furniture stands inside the room, on or above the floor', () => {
+    const out = [];
+    for (const b of STATIC_BOXES) {
+      if (SHELL.has(b.id)) continue;
+      const { min, max } = worldBox(b);
+      if (min[0] < ROOM.minX - 1e-9 || max[0] > ROOM.maxX + 1e-9 || min[2] < ROOM.minZ - 1e-9 || max[2] > ROOM.maxZ + 1e-9 || min[1] < -1e-9) out.push(b.id);
+    }
+    expect(out).toEqual([]);
+  });
+
+  it('no solid box intrudes into a hiding volume, and each check point has room to crouch', () => {
+    const clearance = 0.3; // m around the owner's crouch point, floor to head
+    const bad = [];
+    for (const b of STATIC_BOXES) {
+      if (SHELL.has(b.id)) continue;
+      const { min, max } = worldBox(b);
+      for (const v of HIDING_VOLUMES) {
+        if ([0, 1, 2].every((i) => max[i] > v.min[i] + 1e-9 && min[i] < v.max[i] - 1e-9)) bad.push(`${b.id} in ${v.id}`);
+        const [x, , z] = v.checkFrom;
+        const d = Math.hypot(Math.max(min[0] - x, 0, x - max[0]), Math.max(min[2] - z, 0, z - max[2]));
+        if (d < clearance && min[1] < 1.8) bad.push(`${b.id} crowds ${v.id}.checkFrom (${d.toFixed(2)} m)`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('every named surface is the top face of some box', () => {
+    const tops = STATIC_BOXES.map((b) => b.center[1] + b.half[1]);
+    const missing = [];
+    for (const [name, h] of Object.entries(SURFACES)) {
+      for (const y of [h].flat()) if (!tops.some((t) => Math.abs(t - y) < 1e-6)) missing.push(`${name} ${y}`);
+    }
+    expect(missing).toEqual([]);
   });
 
   it('hiding volumes sit inside the room and above the floor', () => {

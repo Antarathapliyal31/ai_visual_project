@@ -10,6 +10,12 @@
 // its keep at the 200-400 bodies fracture debris creates. The naive
 // broadphase stays available as a switchable reference.
 //
+// The world runs B's game solver by default, as the game does. With
+// cannon-es's stock solver about 230 of 400 props never fall asleep, and the
+// settled narrowphase load is set by that jitter, not by the broadphase.
+// The grid hands the narrowphase only pairs whose AABBs really overlap, so
+// the cell size changes broadphase time, not the pair count.
+//
 // Scenario contract: {name, setup, step, metrics, pass}. No Three.js.
 
 import * as CANNON from 'cannon-es';
@@ -19,6 +25,7 @@ import { UniformGridBroadphase } from '../../src/collision/gridBroadphase.js';
 import { buildStaticGeometry, STATIC_BOXES, ROOM } from '../../src/collision/staticGeometry.js';
 import { createSweptGuard } from '../../src/collision/sweptGuard.js';
 import { narrowPairCount } from '../../src/collision/overlay.js';
+import { WarmGSSolver } from '../../src/physics/solver.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -80,6 +87,7 @@ function spawnSlots(rand, spacing = 0.3) {
  * @param {number} [opts.bodies=400]
  * @param {'grid'|'naive'|'sap'} [opts.broadphase='grid']
  * @param {number} [opts.cellSize]       grid only; defaults to tuning
+ * @param {'game'|'stock'} [opts.solver='game']  B's warm-started solver, or cannon-es's GSSolver
  * @param {boolean} [opts.allowSleep=true]
  * @param {boolean} [opts.guard=true]
  * @param {number} [opts.activeSteps=120]  steps measured while props fall and collide
@@ -88,7 +96,7 @@ function spawnSlots(rand, spacing = 0.3) {
  */
 export function createBroadphasePerfScenario(opts = {}) {
   const {
-    bodies: count = 400, broadphase: kind = 'grid', cellSize = tuning.collision.grid.cellSize,
+    bodies: count = 400, broadphase: kind = 'grid', cellSize = tuning.collision.grid.cellSize, solver = 'game',
     allowSleep = true, guard: guardOn = true, activeSteps = 120, settleSteps = 360, seed = 400,
   } = opts;
   const settledSteps = activeSteps;
@@ -100,12 +108,19 @@ export function createBroadphasePerfScenario(opts = {}) {
   const fresh = () => ({ steps: 0, ms: 0, bpMs: 0, maxMs: 0, candidates: 0, pairs: 0, narrow: 0, maxNarrow: 0, awake: 0 });
 
   const scenario = {
-    name: `broadphase perf: ${count} bodies, ${kind}${kind === 'grid' ? ` @ ${cellSize} m` : ''}`,
+    name: `broadphase perf: ${count} bodies, ${kind}${kind === 'grid' ? ` @ ${cellSize} m` : ''}, ${solver} solver`,
 
     setup() {
       const rand = mulberry32(seed);
       world = new CANNON.World({ gravity: new CANNON.Vec3(0, tuning.physics.gravity, 0) });
       world.allowSleep = allowSleep;
+      if (solver === 'game') {
+        const ph = tuning.physics;
+        world.solver = new WarmGSSolver({
+          iterations: ph.solverIterations, tolerance: ph.solverTolerance, warmStart: ph.warmStart,
+          coulombFriction: ph.coulombFriction, restitutionThreshold: ph.restitutionThreshold, maxContactsPerPair: ph.maxContactsPerPair,
+        });
+      }
       world.broadphase = kind === 'sap' ? new CANNON.SAPBroadphase(world) : makeBroadphase(kind, cellSize);
       world.broadphase.setWorld(world);
       // Count the pairs any broadphase hands to the narrowphase.
@@ -175,7 +190,7 @@ export function createBroadphasePerfScenario(opts = {}) {
       } : null;
       const escaped = props.filter((b) => !(b.position.y > -0.2 && b.position.y < 3 &&
         b.position.x > ROOM.minX - 0.3 && b.position.x < ROOM.maxX + 1 && b.position.z > ROOM.minZ - 0.3 && b.position.z < ROOM.maxZ + 1)).length;
-      return { bodies: count, broadphase: kind, cellSize: kind === 'grid' ? cellSize : null, active: avg(windows.active), settled: avg(windows.settled), escaped };
+      return { bodies: count, broadphase: kind, solver, cellSize: kind === 'grid' ? cellSize : null, active: avg(windows.active), settled: avg(windows.settled), escaped };
     },
 
     /** Pass: the simulation stayed sane. The numbers themselves are for tuning. */

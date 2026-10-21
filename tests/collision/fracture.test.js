@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as CANNON from 'cannon-es';
 import { createFracture, makePrism, precut } from '../../src/collision/fracture.js';
 import { UniformGridBroadphase } from '../../src/collision/gridBroadphase.js';
-import { DEBRIS } from '../../src/core/groups.js';
+import { DEBRIS, CAT } from '../../src/core/groups.js';
+import { tuning } from '../../src/core/tuning.js';
 
 const momentum = (bodies) => bodies.reduce((p, b) => p.vadd(b.velocity.scale(b.mass)), new CANNON.Vec3());
 const plateBody = () => new CANNON.Body({ mass: 0.25, shape: new CANNON.Cylinder(0.18, 0.18, 0.025, 16), position: new CANNON.Vec3(0, 1, 0) });
@@ -111,6 +112,20 @@ describe('createFracture', () => {
     expect(fx.flush()).toHaveLength(0);
     expect(world.bodies).toContain(plate);
     expect(world.bodies).toContain(other);
+  });
+
+  it("skips the cat's own contacts unless breakOnCat is set", () => {
+    const cat = new CANNON.Body({ mass: 3, shape: new CANNON.Sphere(0.1), collisionFilterGroup: CAT });
+    for (const breakOnCat of [false, true]) {
+      const world = new CANNON.World();
+      const plate = plateBody();
+      world.addBody(plate);
+      const fx = createFracture(world, { tuning: { ...tuning.collision.fracture, breakOnCat } });
+      fx.register(plate, { kind: 'plate', breakImpulse: 0.7 });
+      fx.onImpact({ bodyA: cat, bodyB: plate, impulse: 6.7 }); // the cat landing a jump on it
+      expect(fx.flush()).toHaveLength(breakOnCat ? 1 : 0);
+    }
+    expect(tuning.collision.fracture.breakOnCat).toBe(false);
   });
 
   it('pieces settle on a floor without exploding (flush between steps)', () => {

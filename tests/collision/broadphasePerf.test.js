@@ -21,6 +21,19 @@ describe('broadphase at 200-400 bodies', () => {
       expect(grid.active.broadphasePairs).toBeLessThan(naive.active.broadphasePairs);
       // Same physics, so the same number of real contacts (within chaos).
       expect(Math.abs(grid.active.narrowPairs - naive.active.narrowPairs)).toBeLessThan(0.1 * naive.active.narrowPairs + 5);
+      // Plan target: about 200 narrow-phase pairs per step or fewer. Only the
+      // moment all 400 props land at once peaks above it (~440 real contacts).
+      expect(grid.active.narrowPairs).toBeLessThanOrEqual(210);
+      expect(grid.settled.narrowPairs).toBeLessThan(200);
     });
   }
+
+  it("the settled load comes from the stock solver's jitter, not the broadphase", () => {
+    const stock = runScenario(createBroadphasePerfScenario({ bodies: 400, solver: 'stock' }));
+    const game = runScenario(createBroadphasePerfScenario({ bodies: 400, solver: 'game' }));
+    console.log(`[perf] stock solver ${row(stock)}`);
+    console.log(`[perf] game solver  ${row(game)}`);
+    expect(game.settled.awake).toBeLessThan(0.75 * stock.settled.awake);
+    expect(game.settled.narrowPairs).toBeLessThan(0.75 * stock.settled.narrowPairs);
+  });
 });

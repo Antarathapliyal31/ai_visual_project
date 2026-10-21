@@ -39,6 +39,7 @@ export const tuning = {
     fracture: {
       shrink: 0.97,          // pre-cut pieces are scaled down so they never spawn overlapping
       defaultBreakImpulse: { mug: 0.9, plate: 0.7 }, // N·s, until B's material table has a column
+      breakOnCat: false,     // cat contacts never break props (it is 3 kg; true makes it a feature)
     },
   },
 

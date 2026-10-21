@@ -58,24 +58,26 @@ The MVP is a single HTML file on the `antara` branch (`last-one-awake-mvp.html`)
 
 ---
 
-## What's built so far by Dharm: collision layer (Workstream A, as of Oct 11)
+## What's built so far by Dharm: collision layer (Workstream A, as of Oct 21)
 
-The collision layer is merged into `main` in `src/collision/`. It's plain JS on top of cannon-es with no Three.js, so it runs headless. **All of Workstream A's planned tasks are implemented, and the Tunneling proof passes.** Run `npm install && npm test` to see it: 56 tests across 9 files.
+The collision layer is merged into `main` in `src/collision/`. It's plain JS on top of cannon-es with no Three.js, so it runs headless. **All of Workstream A's planned tasks are implemented, and the Tunneling proof passes in Node and in Chrome.** Run `npm install && npm test` to see it: 61 collision tests across 9 files.
 
 **Working:**
-- **Static geometry store** (`staticGeometry.js`). The whole room as data (`STATIC_BOXES`), built once into STATIC bodies. It includes the bed-skirt `OCCLUDERS`, the `HIDING_VOLUMES` (under the bed, under the desk), the named `SURFACES` heights props spawn on, and invisible boundary walls on the cut-away sides so props can't roll off the floor.
+- **Static geometry store** (`staticGeometry.js`). The whole room as data (`STATIC_BOXES`), built once into STATIC bodies. It includes the bed-skirt `OCCLUDERS`, the `HIDING_VOLUMES` (under the bed, under the desk), the named `SURFACES` heights props spawn on, and invisible boundary walls on the cut-away sides so props can't roll off the floor. **B's added furniture (couch, coffee table, aquarium, chair, cat tree) is reviewed and accepted:** it stays inside the room, keeps out of both hiding volumes and 30 cm clear of their crouch points, and every new `SURFACES` height matches a box top, all now checked by tests. Crouched sight into both hiding spots is unchanged. For C: the couch, coffee table and chair do add blind floor behind them for a standing owner (74 to 162 of 817 sampled floor points from beside the bed).
 - **Uniform grid broadphase** (`UniformGridBroadphase`). A cannon-es `Broadphase` subclass with `collisionPairs()` and `aabbQuery()`; the cell size comes from `tuning.js` (0.5 m). Across 1,000 random scenes it finds exactly the pairs the naive broadphase does. cannon's own `world.raycast*` keeps working with it.
 - **`raycast(origin, dir, maxDist, mask)`**: returns `{hit, distance, point, normal, body}`, following the contract. It uses slab and ray-vs-box tests and walks the grid. It matches `world.raycastClosest` on 10,000 random rays.
 - **Swept-sphere tunneling guard** (`createSweptGuard`). It runs after every substep and only clamps when discrete collision would actually fail, so resting stacks and sliding props are left alone.
-- **Fracture** (`createFracture`). A plate breaks into 3 wedges, a mug into 2 shells plus its base. Pieces keep the parent's velocity and spin, conserving momentum. It's driven by `ImpactEvent`s.
+- **Fracture** (`createFracture`). A plate breaks into 3 wedges, a mug into 2 shells plus its base. Pieces keep the parent's velocity and spin, conserving momentum. It's driven by `ImpactEvent`s. The cat's own contacts never break anything (`tuning.collision.fracture.breakOnCat: false`); set it to `true` to make that a feature.
 - **Hiding helpers** (`hidingSpotAt`, `lineOfSight`). Hiding works through geometry, not a flag.
 - **Overlay data** (`collisionDebugData`, `registerCollisionDebug`): occupied cells, candidate, broadphase and narrow-phase pairs, guard counters.
 - **Live demo page** (`harness/collision-demo.html`): tunneling, sight and hiding, fracture, and 400-body broadphase views. Run `python3 -m http.server 8550` in the repo root and open `http://localhost:8550/harness/collision-demo.html`.
+- **Browser proof page** (`harness/collision-proofs.html`): runs the tunneling proof and the 200/400-body broadphase profile with the same scenario code as the tests, shows pass or fail, and saves a JSON log. Open it in Chrome and in Firefox for the Oct 28 proofs.
 
 **Measured results:**
-- **Tunneling, 12 m/s into the 2 cm shelf:** with the guard on, 0 of 100 swats pass through; with it off, 22 of 100 do. The failure speed is 12 m/s without the guard and above 100 m/s with it.
+- **Tunneling, 12 m/s into the 2 cm shelf, using B's real `swat()`:** with the guard on, 0 of 100 swats pass through; with it off, 22 of 100 do. The failure speed is 12 m/s without the guard and above 100 m/s with it. Same numbers in Node and Chrome 156.
 - **Five-plate stack, 60 s:** the plates end in identical positions with the guard on and off, with 0 clamps.
-- **400 bodies:** while props are moving, the grid hands about 270 pairs to the narrowphase against about 1,400 for Naive, and the step drops from about 8 ms to about 5 ms. Once settled, every broadphase takes about 7–8 ms, because roughly 230 bodies never fall asleep. That's a sleep-tuning issue, not a broadphase one.
+- **400 bodies, B's game solver, grid at 0.5 m (Chrome 156):** while props are moving the grid hands 268 pairs to the narrowphase against 1,447 for Naive, with 198 narrow-phase pairs a step on average (target: about 200), and the step takes 6.2 ms against 7.3 ms. Settled, it is 128 narrow-phase pairs and 1.6 ms against 2.9 ms. Only the moment all 400 props land at once peaks at about 440 real contacts.
+- **Why the settled numbers dropped:** the perf scenario used to run cannon-es's stock solver, which leaves about 230 of 400 props jittering awake (312 narrow pairs, 7–8 ms). It now runs B's solver, as the game does. Cell sizes from 0.3 to 1.0 m change broadphase time only, not pairs, since the grid passes on only true AABB overlaps; 0.5 m was fastest.
 
 ### Integration rules for other workstreams (read before using `src/collision/`)
 
@@ -88,7 +90,7 @@ Import everything from `src/collision/index.js`. These rules apply to people and
 5. **Use the collision helpers for sight.** Call `lineOfSight(raycast, eye, catPos, STATIC, { skip: catBody })`. Occluders (the bed skirt) block sight but bodies pass through them. For a crouch check, stand at a hiding volume's `checkFrom` with a lower eye. *(C)*
 6. **Use the owner's material table for break impulses.** Pass each break impulse to `fracture.register(body, { kind, breakImpulse })`, taking it from B's material table. Until that column exists, the defaults in `tuning.js` are used. *(B)*
 7. **Replace the stubs freely.** `package.json`, `vitest.config.js`, `src/core/tuning.js` and `src/core/groups.js` are minimal stubs marked `STUB (owner: D)`, added only so the collision tests run. Keep the `collision` block of `tuning.js` and the group bit values.
-8. **The tunneling scenario needs the real `swat()`.** `harness/scenarios/tunneling.js` uses `stubSwat()`, which follows the `swat()` contract. Switch it to B's `swat()` when that lands.
+8. **Feed every contact to fracture, cat included.** `fracture.onImpact()` skips the cat's contacts itself while `breakOnCat` is false, so the harvester doesn't need its own cat filter. *(D)*
 
 ### Open decision: one room layout (pending team agreement)
 

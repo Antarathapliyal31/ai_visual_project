@@ -21,7 +21,7 @@
 
 import * as CANNON from 'cannon-es';
 import { tuning as defaultTuning } from '../core/tuning.js';
-import { DEBRIS, ALL } from '../core/groups.js';
+import { DEBRIS, CAT, ALL } from '../core/groups.js';
 
 /**
  * @typedef {object} ImpactEvent  (D's harvester -> noise, score, fracture)
@@ -166,11 +166,17 @@ export function createFracture(world, opts = {}) {
     queued.delete(body);
   }
 
-  /** Feed every ImpactEvent here. Each body breaks at most once. */
+  /**
+   * Feed every ImpactEvent here. Each body breaks at most once. Unless
+   * tuning says `breakOnCat`, the cat's own contacts never break anything:
+   * at 3 kg it would shatter every plate it walked into.
+   */
   function onImpact(event) {
     for (const b of [event.bodyA, event.bodyB]) {
       const entry = registry.get(b);
       if (!entry || queued.has(b)) continue;
+      const other = b === event.bodyA ? event.bodyB : event.bodyA;
+      if (!cfg.breakOnCat && other && (other.collisionFilterGroup & CAT)) continue;
       if (event.impulse >= entry.breakImpulse) queued.set(b, event);
     }
   }
