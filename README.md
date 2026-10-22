@@ -76,8 +76,8 @@ The collision layer is merged into `main` in `src/collision/`. It's plain JS on 
 **Measured results:**
 - **Tunneling, 12 m/s into the 2 cm shelf, using B's real `swat()`:** with the guard on, 0 of 100 swats pass through; with it off, 22 of 100 do. The failure speed is 12 m/s without the guard and above 100 m/s with it. Same numbers in Node and Chrome 156.
 - **Five-plate stack, 60 s:** the plates end in identical positions with the guard on and off, with 0 clamps.
-- **400 bodies, B's game solver, grid at 0.5 m (Chrome 156):** while props are moving the grid hands 268 pairs to the narrowphase against 1,447 for Naive, with 198 narrow-phase pairs a step on average (target: about 200), and the step takes 6.2 ms against 7.3 ms. Settled, it is 128 narrow-phase pairs and 1.6 ms against 2.9 ms. Only the moment all 400 props land at once peaks at about 440 real contacts.
-- **Why the settled numbers dropped:** the perf scenario used to run cannon-es's stock solver, which leaves about 230 of 400 props jittering awake (312 narrow pairs, 7–8 ms). It now runs B's solver, as the game does. Cell sizes from 0.3 to 1.0 m change broadphase time only, not pairs, since the grid passes on only true AABB overlaps; 0.5 m was fastest.
+- **400 bodies in B's game world, grid at 0.5 m (Chrome 156):** while props are moving the grid hands 270 pairs to the narrowphase against 1,454 for Naive, with 193 narrow-phase pairs a step on average (target: about 200), and the step takes 6.2 ms against 8.0 ms. Settled, it is 135 narrow-phase pairs and 2.5 ms against 3.5 ms. Only the moment all 400 props land at once peaks at about 430 real contacts.
+- **Why the settled numbers dropped:** the perf scenario used to run cannon-es's stock solver, which leaves about 230 of 400 props jittering awake (312 narrow pairs, 7–8 ms). It now builds its world with B's `createPhysicsWorld()` (solver, material table and tuning), as the game does. Cell sizes from 0.3 to 1.0 m change broadphase time only, not pairs, since the grid passes on only true AABB overlaps; 0.5 m was fastest.
 
 ### Integration rules for other workstreams (read before using `src/collision/`)
 
@@ -170,6 +170,28 @@ Import from `src/physics/index.js` and `src/player/index.js`.
 - **`swat()` has landed** (A's rule 8). On a resting target it gives bit-for-bit the velocity `stubSwat()` does, so `harness/scenarios/tunneling.js` can switch its import with no change to its numbers. That file is A's, so it hasn't been touched.
 - **Open: should the cat itself break things?** The cat is 3 kg. Walking into a plate lying on the floor delivers about 2.4 N·s to it, and landing on one from a jump about 6.7 N·s; a plate breaks at 0.7. If the harvester feeds cat contacts to fracture, the cat shatters every plate it steps on. A and D need to pick: skip `CAT` pairs for fracture, or keep it as a feature.
 - **Known limits.** The cat sinks up to 1.6 cm into the floor for a frame or two when it lands a full jump, and 0.8 cm into a wall at full speed: cannon-es has no speculative contacts, and A's guard only steps in for real tunneling. A stack of 12 plates holds for 60 s at the default 30 solver passes; 15 does not.
+
+---
+
+## Code review of `main` (by Dharm Patel, Oct 22)
+
+I reviewed everything merged into `main` on Oct 22 (Rushi's and Christina's work from the `Rushi` branch, Antara's MVP, and my own collision work). All 221 tests pass and every harness page loads in Chrome with no errors, but the review found ten logic bugs the tests don't cover. Each is listed under its owner; please fix yours or reply in the group chat if you disagree.
+
+**Christina (C, owner AI):**
+- [ ] **The owner never calms down** (`src/ai/ownerStateMachine.js:41`). Once a noise is stored, `stirring`, `sittingUp` and `standing` never drop to a lower stage as the wake level falls, and the noise is never cleared. Example: `onNoise({loudness: 0.9}); update(dt, 0.75)` gives `standing`, then `update(dt, 0.1)` still returns `standing` with action `search` forever.
+- [ ] **The owner teleports to the noise** (`src/ai/ownerStateMachine.js:133`). `onNoise()` sets the owner's position to the noise source instead of only setting a target, so a plate breaking on the desk makes the owner appear at the desk.
+- [ ] **Start position and target are ignored** (`src/ai/ownerPlaceholder.js:66`). The end of `createOwnerPlaceholder` overwrites `owner.position` with `bedPosition` and `owner.target` with `null`, so `options.position` and `options.target` are lost (`basePosition` is computed and never used).
+- [ ] **The behaviour tree hard-codes its thresholds** (`src/ai/behaviorTree.js:29`). It uses loudness 0.5 and wake 0.7 instead of the state machine's tunable thresholds, so stages and actions disagree once thresholds are tuned (with `standing: 0.5` the owner stands at 0.55 but the tree still picks `checkHidingSpot` until 0.7).
+
+**Rushi (B, physics):**
+- [ ] **The sleep toggle has no effect on some worlds** (`src/physics/world.js:90`). `applyTuning()` lets `opts.allowSleep` win over `tuning.physics.allowSleep`, so the overlay's "body sleeping" toggle does nothing on a world created with `allowSleep` (e.g. the stacking scenario).
+- [ ] **Debris ignores the sleep tuning** (`src/physics/world.js:93`). Fracture pieces keep cannon's default sleep limits (0.1 m/s, 1 s) because `applyTuning()` only loops over props, so the 200-400 debris bodies sleep at different thresholds than the tuned props.
+- [ ] **Odd contact limits keep the wrong number of points** (`src/physics/solver.js:251`). `_reduceContacts` keeps `2 * floor(max / 2)` points, at least 2: a limit of 1 keeps 2, 3 keeps 2, and 5 keeps 4.
+- [ ] **The solver pass count reads one low** (`src/physics/solver.js:204`). When the tolerance early-out fires, the `break` comes before `iter++`, so the overlay shows 0 passes after one full pass.
+- [ ] **The play pages filter cat contacts before fracture** (`harness/play.html:279`, `harness/dynamics-demo.html:472`). Fracture now skips cat contacts itself (`tuning.collision.fracture.breakOnCat`), so these pre-filters are redundant and make `breakOnCat: true` do nothing in the game. Forward every `ImpactEvent` to `physics.fracture.onImpact()` and let fracture decide.
+
+**Dharm (A, collision):**
+- [x] **The perf scenario copied the game solver setup by hand** (`harness/scenarios/broadphasePerf.js`). It built `WarmGSSolver` itself instead of reusing B's tuning-to-solver mapping in `src/physics/world.js`, so a new solver option added there would have been missing from the benchmark. **Fixed:** the scenario now builds its world with `createPhysicsWorld()`. The target still holds (193 narrow-phase pairs active, 135 settled).
 
 ---
 

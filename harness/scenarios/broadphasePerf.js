@@ -10,7 +10,8 @@
 // its keep at the 200-400 bodies fracture debris creates. The naive
 // broadphase stays available as a switchable reference.
 //
-// The world runs B's game solver by default, as the game does. With
+// The world is B's game world by default (createPhysicsWorld: its solver,
+// material table and tuning), so the benchmark runs what the game runs. With
 // cannon-es's stock solver about 230 of 400 props never fall asleep, and the
 // settled narrowphase load is set by that jitter, not by the broadphase.
 // The grid hands the narrowphase only pairs whose AABBs really overlap, so
@@ -25,7 +26,7 @@ import { UniformGridBroadphase } from '../../src/collision/gridBroadphase.js';
 import { buildStaticGeometry, STATIC_BOXES, ROOM } from '../../src/collision/staticGeometry.js';
 import { createSweptGuard } from '../../src/collision/sweptGuard.js';
 import { narrowPairCount } from '../../src/collision/overlay.js';
-import { WarmGSSolver } from '../../src/physics/solver.js';
+import { createPhysicsWorld } from '../../src/physics/world.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -87,7 +88,7 @@ function spawnSlots(rand, spacing = 0.3) {
  * @param {number} [opts.bodies=400]
  * @param {'grid'|'naive'|'sap'} [opts.broadphase='grid']
  * @param {number} [opts.cellSize]       grid only; defaults to tuning
- * @param {'game'|'stock'} [opts.solver='game']  B's warm-started solver, or cannon-es's GSSolver
+ * @param {'game'|'stock'} [opts.solver='game']  B's game world, or a bare world with cannon-es's GSSolver
  * @param {boolean} [opts.allowSleep=true]
  * @param {boolean} [opts.guard=true]
  * @param {number} [opts.activeSteps=120]  steps measured while props fall and collide
@@ -112,14 +113,15 @@ export function createBroadphasePerfScenario(opts = {}) {
 
     setup() {
       const rand = mulberry32(seed);
-      world = new CANNON.World({ gravity: new CANNON.Vec3(0, tuning.physics.gravity, 0) });
-      world.allowSleep = allowSleep;
       if (solver === 'game') {
-        const ph = tuning.physics;
-        world.solver = new WarmGSSolver({
-          iterations: ph.solverIterations, tolerance: ph.solverTolerance, warmStart: ph.warmStart,
-          coulombFriction: ph.coulombFriction, restitutionThreshold: ph.restitutionThreshold, maxContactsPerPair: ph.maxContactsPerPair,
-        });
+        // B's world builds the solver, room and guard from tuning.js; only the
+        // broadphase under test is swapped in afterwards.
+        world = createPhysicsWorld({ guard: guardOn, fracture: false, allowSleep }).world;
+      } else {
+        world = new CANNON.World({ gravity: new CANNON.Vec3(0, tuning.physics.gravity, 0) });
+        world.allowSleep = allowSleep;
+        buildStaticGeometry(world);
+        if (guardOn) createSweptGuard(world);
       }
       world.broadphase = kind === 'sap' ? new CANNON.SAPBroadphase(world) : makeBroadphase(kind, cellSize);
       world.broadphase.setWorld(world);
@@ -131,8 +133,6 @@ export function createBroadphasePerfScenario(opts = {}) {
         lastBroadphaseMs = now() - t;
         lastPairs = p1.length;
       };
-      buildStaticGeometry(world);
-      if (guardOn) createSweptGuard(world);
 
       const slots = spawnSlots(rand);
       if (slots.length < count) throw new Error(`only ${slots.length} spawn slots for ${count} bodies`);
