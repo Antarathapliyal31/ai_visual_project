@@ -8,7 +8,7 @@ Group: Rushi Patel (leader), Dharm Patel, Antara Thapliyal, Christina Ross.
 **Live build:** _(fill in after first Vercel deploy)_
 **Mockup (previous Matter.js version):** https://lastoneawake.netlify.app/
 **Repo:** https://github.com/Antarathapliyal31/ai_visual_project
-**Current MVP:** on the `antara` branch, single file `last-one-awake-mvp.html` (open it in a browser)
+**Current MVP:** single file `last-one-awake-mvp.html` in the repo root (open it in a browser)
 
 ---
 
@@ -39,7 +39,7 @@ The coupling: the solver's contact impulses are the input to the AI's perception
 
 ## What's built so far by Antara(as of Oct 11)
 
-The MVP is a single HTML file on the `antara` branch (`last-one-awake-mvp.html`). It runs end to end: cat moves, bumps things, noise feeds the wake meter, owner wakes up and catches the cat. All built in Three.js + cannon-es, no engine.
+The MVP is a single HTML file in the repo root (`last-one-awake-mvp.html`). It runs end to end: cat moves, bumps things, noise feeds the wake meter, owner wakes up and catches the cat. All built in Three.js + cannon-es, no engine.
 
 **Working:**
 - 3D studio apartment: floor, walls, desk with chair, bed with headboard, nightstand with lamp and alarm clock, bookshelf with books and plant, couch with cushions, coffee table with mugs, floor lamp, window with moonlight
@@ -95,7 +95,7 @@ Import everything from `src/collision/index.js`. These rules apply to people and
 ### Open decision: one room layout (pending team agreement)
 
 There are currently **two different rooms**, and they need to become one:
-- **Antara's MVP (`antara` branch):** the original 12 × 12 m room, with the desk in the middle of the floor, a couch, a coffee table and a chair.
+- **Antara's MVP (`last-one-awake-mvp.html`):** the original 12 × 12 m room, with the desk in the middle of the floor, a couch, a coffee table and a chair.
 - **`src/collision/staticGeometry.js`:** the layout from the concept art (`docs/concept/ref3d.png`). It's a 7 × 6 m cut-away room with the bed and nightstand on the west wall (inner face x = −3.5), and the desk, window sill and bookshelf on the north wall (z = −3.0).
 
 Per the contracts table, static geometry comes from A and feeds the broadphase, the guard and C's hiding checks, so **the renderer should build furniture meshes from `STATIC_BOXES`** rather than placing its own. Otherwise the drawn room and the physical room drift apart. The proposal is to use the concept-art layout, since it's the final target and the hiding spots and the 2 cm shelf are tuned for it. Missing furniture such as the couch or coffee table would be added to the store.
@@ -191,8 +191,7 @@ Requires Node 18 or newer.
 ```bash
 git clone https://github.com/Antarathapliyal31/ai_visual_project.git
 cd ai_visual_project
-# For now the project is a single HTML file on the `antara` branch:
-git checkout antara
+# Antara's single-file MVP:
 open last-one-awake-mvp.html   # Chrome or Firefox
 # Once the Vite project is set up on `main`:
 npm install
