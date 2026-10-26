@@ -72,11 +72,24 @@ export function createPhysicsWorld(opts = {}) {
       // the plate) and `parentSerial` the prop it came from: a renderer needs both to draw
       // the pieces as parts of that one object.
       info.pieces.forEach((piece, index) => {
+        tuneSleep(piece.body);
         debris.push({ kind: 'debris', debrisOf: info.kind, body: piece.body, visual: piece.spec, index, parentSerial: parent ? parent.serial : null });
       });
       opts.onBroken?.(info);
     },
   });
+
+  /** Props and debris sleep at the tuned thresholds, not cannon's defaults. */
+  function tuneSleep(body) {
+    body.sleepSpeedLimit = ph.sleepSpeedLimit;
+    body.sleepTimeLimit = ph.sleepTimeLimit;
+  }
+
+  // opts.allowSleep is a choice made when the world is built (the stacking
+  // proof runs with sleeping off). Once tuning.js's value changes, e.g. from
+  // the overlay's toggle, the world follows tuning.js instead.
+  let sleepOverride = opts.allowSleep;
+  const sleepTunedAtStart = ph.allowSleep;
 
   /** Re-read tuning.js into the world. Call after the overlay changes a number. */
   function applyTuning() {
@@ -87,12 +100,11 @@ export function createPhysicsWorld(opts = {}) {
     world.solver.coulombFriction = ph.coulombFriction;
     world.solver.restitutionThreshold = ph.restitutionThreshold;
     world.solver.maxContactsPerPair = ph.maxContactsPerPair;
-    world.allowSleep = opts.allowSleep ?? ph.allowSleep;
+    if (sleepOverride !== undefined && ph.allowSleep !== sleepTunedAtStart) sleepOverride = undefined;
+    world.allowSleep = sleepOverride ?? ph.allowSleep;
     materials.refresh();
-    for (const p of props) {
-      p.body.sleepSpeedLimit = ph.sleepSpeedLimit;
-      p.body.sleepTimeLimit = ph.sleepTimeLimit;
-    }
+    for (const p of props) tuneSleep(p.body);
+    for (const d of debris) tuneSleep(d.body);
     if (!world.allowSleep) for (const b of world.bodies) if (b.sleepState !== CANNON.Body.AWAKE) b.wakeUp();
   }
   applyTuning();

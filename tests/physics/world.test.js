@@ -167,4 +167,36 @@ describe('createPhysicsWorld', () => {
     physics.applyTuning();
     expect(mug.body.sleepState).toBe(CANNON.Body.AWAKE);
   });
+
+  // Code review, Oct 22: the toggle did nothing on a world built with allowSleep.
+  it('lets the sleep toggle work on a world built with its own allowSleep', () => {
+    const t = freshTuning();
+    const physics = createPhysicsWorld({ tuning: t, allowSleep: false });
+    expect(physics.world.allowSleep).toBe(false);
+    physics.applyTuning(); // another number changed: the creation-time choice stays
+    expect(physics.world.allowSleep).toBe(false);
+    t.physics.allowSleep = false;
+    physics.applyTuning();
+    expect(physics.world.allowSleep).toBe(false);
+    t.physics.allowSleep = true; // the overlay switches it back on
+    physics.applyTuning();
+    expect(physics.world.allowSleep).toBe(true);
+  });
+
+  // Code review, Oct 22: fracture pieces kept cannon's default sleep limits.
+  it('gives debris the tuned sleep limits, when it is made and when tuning changes', () => {
+    const t = freshTuning((x) => { x.physics.sleepSpeedLimit = 0.03; x.physics.sleepTimeLimit = 0.6; });
+    const physics = createPhysicsWorld({ tuning: t });
+    const plate = physics.spawn('plate', { base: [0.6, SURFACES.deskTop, -2.6] });
+    physics.onAfterStep(() => { if (physics.stepCount === 2) physics.fracture.onImpact({ bodyA: plate.body, bodyB: null, impulse: 5 }); });
+    for (let i = 0; i < 3; i++) physics.step();
+    expect(physics.debris).toHaveLength(3);
+    for (const d of physics.debris) {
+      expect(d.body.sleepSpeedLimit).toBe(0.03);
+      expect(d.body.sleepTimeLimit).toBe(0.6);
+    }
+    t.physics.sleepSpeedLimit = 0.08;
+    physics.applyTuning();
+    for (const d of physics.debris) expect(d.body.sleepSpeedLimit).toBe(0.08);
+  });
 });

@@ -173,6 +173,32 @@ describe('contact impulses', () => {
     expect(boxSolver.stats.dropped).toBe(0);
   });
 
+  // Code review, Oct 22: odd limits kept 2 * floor(max / 2) points (1 kept 2, 3 kept 2, 5 kept 4).
+  it('keeps exactly maxContactsPerPair points, odd limits included', () => {
+    for (const max of [1, 2, 3, 4, 5, 6]) {
+      // One step from rest: all 12 rim points touch, before a 1-point plate can tip.
+      const solver = new WarmGSSolver({ maxContactsPerPair: max });
+      const w = restingWorld({ shape: 'plate', solver });
+      w.world.step(w.dt);
+      expect(w.world.contacts.length, `limit ${max}`).toBe(12);
+      expect(solver.stats.equations, `limit ${max}`).toBe(max * 3);
+      expect(w.world.contacts.filter((c) => c.multiplier > 0).length, `limit ${max}`).toBeLessThanOrEqual(max);
+    }
+  });
+
+  // Code review, Oct 22: the count read one low when the tolerance early-out fired.
+  it('counts the pass that converged', () => {
+    const solver = new WarmGSSolver({ iterations: 30, tolerance: 1e3 }); // so loose the first pass converges
+    const w = restingWorld({ solver });
+    w.settle();
+    expect(solver.stats.iterations).toBe(1);
+    const strict = new WarmGSSolver({ tolerance: 0 });
+    const s = restingWorld({ solver: strict });
+    strict.iterations = 7; // restingWorld sets 20
+    s.settle();
+    expect(strict.stats.iterations).toBe(7);
+  });
+
   it('forgets its cache when nothing is in contact', () => {
     const solver = new WarmGSSolver();
     const w = restingWorld({ solver });

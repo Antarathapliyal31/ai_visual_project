@@ -199,7 +199,7 @@ export class WarmGSSolver extends CANNON.GSSolver {
         total += delta > 0 ? delta : -delta;
         c.addToWlambda(delta);
       }
-      if (total * total < tolSquared) break;
+      if (total * total < tolSquared) { iter++; break; } // count the pass that converged
     }
     stats.iterations = iter;
 
@@ -248,7 +248,8 @@ export class WarmGSSolver extends CANNON.GSSolver {
    */
   _reduceContacts(contacts) {
     const max = this.maxContactsPerPair;
-    const directions = Math.max(1, Math.floor(max / 2));
+    // Two extremes per direction; an odd limit keeps one in the last direction.
+    const directions = Math.max(1, Math.ceil(max / 2));
     let dropped = 0;
     for (let i = 0; i < contacts.length;) {
       let j = i + 1;
@@ -268,7 +269,7 @@ export class WarmGSSolver extends CANNON.GSSolver {
             if (v > hiV) { hiV = v; hi = k; }
           }
           contacts[lo].__drop = false;
-          contacts[hi].__drop = false;
+          if (2 * d + 1 < max) contacts[hi].__drop = false;
         }
         for (let k = i; k < j; k++) {
           const c = contacts[k];

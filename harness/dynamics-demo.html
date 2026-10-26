@@ -467,10 +467,9 @@ function playMode() {
         e.matA = physics.materials.nameOf(e.bodyA) ?? '?';
         e.matB = physics.materials.nameOf(e.bodyB) ?? '?';
         lastImpact = { ...e, loudness: physics.materials.loudness(e.matA, e.matB) };
-        // Cat contacts are left out of fracture here: at 3 kg it would shatter
-        // every plate it steps on. Whether it should is A's and D's call.
-        const catPair = e.bodyA === cat.body || e.bodyB === cat.body;
-        if (opts.fracture && !catPair) physics.fracture.onImpact(e);
+        // Every contact goes to fracture; it skips the cat's own contacts itself
+        // unless tuning.collision.fracture.breakOnCat says otherwise.
+        if (opts.fracture) physics.fracture.onImpact(e);
       }
       touching = new Set(now.keys());
     });
