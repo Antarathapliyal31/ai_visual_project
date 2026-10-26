@@ -5,27 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Last One Awake</title>
 <!--
-  The room in the cozy look: A's static geometry, B's props and cat, and a
-  render layer made of procedural textures (harness/look/). Everything that
-  moves is the real simulation from src/; nothing here writes to it.
+  The game: A's static geometry, B's props and cat, the noise model and wake
+  meter (src/noise), the owner (src/ai, around C's state machine and behaviour
+  tree) and the round (src/core/round.js), drawn by the render layer in
+  harness/look/. Everything that moves is the real simulation from src/;
+  nothing here writes to it except the cat's input.
 
   Serve the repo root over HTTP (ES modules don't load from file://):
     python3 -m http.server 8550
   then open http://localhost:8550/harness/play.html
 -->
 <style>
-  :root { --wood-hi:#8a5526; --wood-lo:#5a3215; --wood-edge:#3a1f0b; --gold:#dba55c; --ink:#f8e7c6; }
+  :root { --wood-hi:#8a5526; --wood-lo:#5a3215; --wood-edge:#3a1f0b; --gold:#dba55c; --ink:#f8e7c6; --alert:#ef5a3a; }
   * { box-sizing:border-box; }
   html, body { margin:0; height:100%; overflow:hidden; background:#0b0e1c;
                font:700 19px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color:var(--ink); }
+  [hidden] { display:none !important; }
+  /* The room sits in a rounded frame, like a diorama. */
   #stage { position:fixed; inset:14px; border-radius:34px; overflow:hidden; background:#131a33;
            box-shadow:0 0 0 5px rgba(232,238,255,.9), 0 14px 44px rgba(0,0,0,.6); }
   #stage canvas { display:block; width:100%; height:100%; filter:saturate(1.2) contrast(1.06); }
   #stage::after { content:""; position:absolute; inset:0; pointer-events:none; border-radius:inherit;
                   background:radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(8,10,24,.5) 100%); }
+  /* Red at the edges while the owner can see the cat; stronger as he becomes sure. */
+  #spotted { position:fixed; inset:14px; border-radius:34px; pointer-events:none; z-index:1; opacity:0; transition:opacity .15s;
+             box-shadow:inset 0 0 90px 22px rgba(239,70,40,.85); }
 
   #hud { position:fixed; top:34px; left:38px; right:38px; display:flex; gap:16px; align-items:flex-start; pointer-events:none; z-index:2; }
   #hud .spacer { flex:1; }
+  body[data-screen="menu"] #hud { visibility:hidden; }
   .plaque { position:relative; display:flex; align-items:center; gap:11px; padding:9px 20px 10px 12px; border-radius:11px;
             border:2px solid var(--gold);
             background:
@@ -35,61 +43,124 @@
             text-shadow:0 2px 0 rgba(40,18,4,.9); letter-spacing:.3px; white-space:nowrap; }
   .plaque svg { width:30px; height:30px; flex:none; filter:drop-shadow(0 2px 0 rgba(40,18,4,.8)); }
   .plaque b { font-weight:700; min-width:1.2em; display:inline-block; }
-  .pips { display:flex; gap:5px; margin-left:4px; }
-  .pips i { width:16px; height:16px; border-radius:3px; background:#3a2110; box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.45); }
-  .pips i.on { background:#f1b53a; box-shadow:inset 0 0 0 1.5px #7a4a0c, 0 0 8px rgba(255,190,70,.7); }
-  .pips i.on.hot { background:#ef6a3a; box-shadow:inset 0 0 0 1.5px #7a240c, 0 0 8px rgba(255,110,60,.8); }
+  .plaque small { display:block; font-size:12px; font-weight:600; opacity:.85; margin-top:4px; }
+  #ownerPlaque { min-width:260px; }
+  #ownerPlaque.alert { border-color:var(--alert); box-shadow:inset 0 0 0 2px var(--wood-edge), 0 0 18px rgba(239,90,58,.8); }
+  .meter { position:relative; width:150px; height:12px; margin-top:6px; border-radius:6px; background:#3a2110; box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.45); overflow:hidden; }
+  .meter i { position:absolute; inset:0 auto 0 0; width:0; background:linear-gradient(90deg, #f1d36a, #f1953a 55%, #ef5a3a); transition:width .12s; }
+  .meter u { position:absolute; top:0; bottom:0; width:2px; background:rgba(40,18,4,.75); }
   #hint { position:fixed; left:38px; bottom:32px; font-size:13px; font-weight:600; padding:7px 14px 8px; gap:8px; opacity:.92; z-index:2; pointer-events:none; }
-  #hint kbd { font:inherit; font-size:12px; padding:1px 6px 2px; border-radius:5px; background:rgba(40,18,4,.55); border:1px solid rgba(219,165,92,.55); }
+  #hint kbd, .card kbd, #problem kbd { font:inherit; font-size:12px; padding:1px 6px 2px; border-radius:5px; background:rgba(40,18,4,.55); border:1px solid rgba(219,165,92,.55); }
   #toast { position:fixed; left:50%; top:104px; transform:translateX(-50%); font-size:17px; padding:9px 20px 10px; z-index:2;
            opacity:0; transition:opacity .25s; pointer-events:none; }
   #toast.show { opacity:1; }
   #debugLink { position:fixed; right:38px; bottom:32px; font-size:13px; font-weight:600; padding:7px 14px 8px; z-index:2; opacity:.92;
                color:var(--ink); text-decoration:none; }
   #debugLink:hover { opacity:1; border-color:#f3c988; }
-  #problem { position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); z-index:3; display:none; flex-direction:column; align-items:flex-start;
+
+  /* Menu, pause and end screens: a wooden card over the dimmed room. */
+  .screen { position:fixed; inset:14px; border-radius:34px; z-index:4; display:flex; align-items:center; justify-content:center;
+            background:radial-gradient(ellipse at 50% 50%, rgba(10,12,26,.35), rgba(8,10,22,.78)); }
+  .card { flex-direction:column; align-items:stretch; gap:14px; padding:26px 34px 28px; max-width:min(620px, 88vw); white-space:normal; line-height:1.35; }
+  .card h1 { margin:0; font-size:44px; letter-spacing:.5px; }
+  .card h2 { margin:0; font-size:34px; }
+  .card p { margin:0; font-size:16px; font-weight:600; }
+  .card .tag { font-size:18px; color:#ffd59a; }
+  .card .keys { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:14px; font-weight:600; }
+  .card .stats { display:flex; gap:18px; flex-wrap:wrap; font-size:16px; }
+  .card .stats b { font-size:22px; display:block; }
+  .card .row { display:flex; gap:12px; flex-wrap:wrap; margin-top:4px; }
+  .card button { font:inherit; font-size:18px; color:var(--ink); cursor:pointer; padding:10px 22px 11px; border-radius:10px; border:2px solid var(--gold);
+                 background:linear-gradient(#b8742e, #7c4618); box-shadow:inset 0 0 0 2px var(--wood-edge), 0 3px 8px rgba(0,0,0,.45);
+                 text-shadow:0 2px 0 rgba(40,18,4,.9); }
+  .card button.quiet { background:linear-gradient(var(--wood-hi), var(--wood-lo)); font-size:16px; }
+  .card button:hover, .card button:focus-visible { border-color:#ffe0a8; outline:none; filter:brightness(1.12); }
+  .card .best { font-size:14px; opacity:.9; }
+  #endTitle.caught { color:#ff9a7a; }
+  #endTitle.won { color:#ffe08a; }
+
+  #problem { position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); z-index:5; display:none; flex-direction:column; align-items:flex-start;
              gap:10px; max-width:min(560px, 80vw); padding:18px 24px 20px; font-size:16px; font-weight:600; line-height:1.4; white-space:normal; }
   #problem.show { display:flex; }
   #problem small { font-size:13px; font-weight:400; opacity:.85; word-break:break-word; }
-  #problem kbd { font:inherit; font-size:13px; padding:1px 6px 2px; border-radius:5px; background:rgba(40,18,4,.55); border:1px solid rgba(219,165,92,.55); }
-
-  #ownerOverlay { display: none; }
-
-  @media (max-width: 760px) { body { font-size:15px; } .plaque svg { width:22px; height:22px; } #hint, #debugLink { display:none; } }
+  @media (max-width: 760px) { body { font-size:15px; } .plaque svg { width:22px; height:22px; } #hint, #debugLink { display:none; } .card h1 { font-size:32px; } }
 </style>
 </head>
-<body>
+<body data-screen="menu">
 <div id="stage"></div>
+<div id="spotted"></div>
 
 <div id="hud">
   <div class="plaque">
     <svg viewBox="0 0 32 32" aria-hidden="true"><g fill="#f3d9a6" stroke="#5a3215" stroke-width="1.6">
       <ellipse cx="16" cy="21" rx="7.5" ry="6"/><ellipse cx="6.5" cy="13.5" rx="3.2" ry="4"/><ellipse cx="12.5" cy="8" rx="3.2" ry="4"/>
       <ellipse cx="19.5" cy="8" rx="3.2" ry="4"/><ellipse cx="25.5" cy="13.5" rx="3.2" ry="4"/></g></svg>
-    <span>Knocked over: <b id="knocked">0</b></span>
+    <span>Chaos <b id="score">0</b><small><span id="knocked">0</span> knocked over · <span id="broken">0</span> broken</small></span>
   </div>
   <div class="plaque">
-    <svg viewBox="0 0 32 32" aria-hidden="true"><g fill="#f7efe0" stroke="#5a3215" stroke-width="1.6" stroke-linejoin="round">
-      <path d="M4 20 15 6l3 9-6 12z"/><path d="M18 12 26 8l3 14-10 5z"/><path d="M8 27l8-3 4 4z"/></g></svg>
-    <span>Broken: <b id="broken">0</b></span>
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M20 4a12 12 0 1 0 8 19A10 10 0 0 1 20 4z" fill="#f3d9a6" stroke="#5a3215" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    <span><b id="clock">3:00</b> to dawn</span>
   </div>
   <div class="spacer"></div>
-  <div class="plaque">
+  <div class="plaque" id="ownerPlaque">
     <svg viewBox="0 0 32 32" aria-hidden="true"><g fill="#f3d9a6" stroke="#5a3215" stroke-width="1.6" stroke-linejoin="round">
-      <path d="M5 12h6l8-7v22l-8-7H5z"/></g><g fill="none" stroke="#f3d9a6" stroke-width="2.4" stroke-linecap="round">
-      <path d="M23 11q4 5 0 10"/><path d="M26.5 7.5q7 8.500 0 17"/></g></svg>
-    <span>Noise</span>
-    <span class="pips" id="pips"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <circle cx="16" cy="10" r="6"/><path d="M5 29c1-8 5-12 11-12s10 4 11 12z"/></g></svg>
+    <span><span id="ownerText">Asleep</span>
+      <span class="meter" id="wakeMeter"><i id="wakeFill"></i></span></span>
   </div>
 </div>
 <div id="toast" class="plaque"></div>
 <a id="debugLink" class="plaque" href="dynamics-demo.html">Debug view: colliders and proofs &rarr;</a>
+
+<div id="hint" class="plaque">
+  <span><kbd>W</kbd><kbd>S</kbd> walk</span><span><kbd>A</kbd><kbd>D</kbd> turn</span><span><kbd>Space</kbd> jump</span><span><kbd>J</kbd> swat</span>
+  <span><kbd>Esc</kbd> pause</span><span><kbd>N</kbd> 3 a.m.</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span id="fps"></span>
+</div>
+
+<div class="screen" id="menu">
+  <div class="card plaque">
+    <h1>Last One Awake</h1>
+    <p class="tag">3 a.m. Everyone's asleep. Except you.</p>
+    <p>Knock things over and break what you can before dawn. Every crash makes noise, and noise wakes him up: first he stirs, then he sits up, then he comes looking. If he sees you for long, you're caught. Under the bed, he can't see you.</p>
+    <div class="keys">
+      <span><kbd>W</kbd> <kbd>S</kbd></span><span>walk forward, back up</span>
+      <span><kbd>A</kbd> <kbd>D</kbd></span><span>turn</span>
+      <span><kbd>Space</kbd></span><span>jump (onto the bed, the couch, the desk...)</span>
+      <span><kbd>J</kbd></span><span>swat what's in front of you</span>
+      <span><kbd>Esc</kbd></span><span>pause</span>
+    </div>
+    <div class="row"><button id="playBtn">Play</button></div>
+    <p class="best" id="bestLine"></p>
+  </div>
+</div>
+
+<div class="screen" id="pause" hidden>
+  <div class="card plaque">
+    <h2>Paused</h2>
+    <div class="row"><button id="resumeBtn">Resume</button><button class="quiet" id="restartBtn">Restart</button><button class="quiet" id="pauseMenuBtn">Main menu</button></div>
+  </div>
+</div>
+
+<div class="screen" id="end" hidden>
+  <div class="card plaque">
+    <h2 id="endTitle">Caught!</h2>
+    <p id="endLine"></p>
+    <div class="stats">
+      <span><b id="endScore">0</b>chaos</span><span><b id="endKnocked">0</b>knocked over</span><span><b id="endBroken">0</b>broken</span><span><b id="endTime">0:00</b>survived</span>
+    </div>
+    <p class="best" id="endBest"></p>
+    <div class="row"><button id="againBtn">Play again</button><button class="quiet" id="endMenuBtn">Main menu</button></div>
+  </div>
+</div>
+
 <div id="problem" class="plaque">
   <span>The room didn't load.</span>
   <span>Hard-reload this page: <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> (Ctrl+Shift+R on Windows). The local server sends no cache headers, so the browser may be running older copies of the game's files.</span>
   <small id="problemDetail"></small>
 </div>
 <script>
+  // Module scripts fail silently on screen (a stale cached file is enough),
+  // so say so instead of leaving an empty frame.
   (function () {
     function problem(detail) {
       if (window.game) return;
@@ -101,10 +172,6 @@
     addEventListener('load', function () { setTimeout(function () { problem(''); }, 6000); });
   })();
 </script>
-<div id="hint" class="plaque">
-  <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span><span><kbd>Space</kbd> jump</span><span><kbd>J</kbd> swat</span>
-  <span><kbd>N</kbd> 3 a.m.</span><span><kbd>R</kbd> reset</span><span><kbd>H</kbd> home view</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span>scroll to zoom</span><span id="fps"></span>
-</div>
 
 <script type="importmap">
 {
@@ -118,22 +185,27 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { tuning } from '../src/core/tuning.js';
+import { createRound } from '../src/core/round.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld, spawnRoomScene } from '../src/physics/index.js';
 import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
+import { createNoise } from '../src/noise/index.js';
+import { createOwner } from '../src/ai/index.js';
 import { buildRoom } from './look/room.js';
 import { createPropLook } from './look/propMeshes.js';
 import { createCatMesh } from './look/catMesh.js';
+import { createOwnerMesh } from './look/ownerMesh.js';
 import { createLights } from './look/lights.js';
 import { createPipeline, applyEnvironment } from './look/pipeline.js';
 import { softShadow } from './look/textures.js';
 
 const DT = tuning.physics.fixedStep;
+const BEST_KEY = 'loa.bestChaos';
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
 
+// --------------------------------------------------------------- renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -145,53 +217,15 @@ stage.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const lights = createLights(scene, renderer);
 
-function showAssetError(message) {
-  const panel = document.getElementById('problem');
-  const detail = document.getElementById('problemDetail');
-  if (panel) panel.classList.add('show');
-  if (detail) detail.textContent = message;
-  console.error(message);
-}
-
-const ownerRig = new THREE.Group();
-ownerRig.name = 'OwnerRig';
-ownerRig.position.set(-1.2, 0, 0.35);
-ownerRig.rotation.y = Math.PI * 0.12;
-ownerRig.visible = true;
-scene.add(ownerRig);
-
-const OWNER_ASSET_URL = '../demo/public/models/demo-avatar.glb?v=quaternius-2026-10-15';
-const ownerLoader = new GLTFLoader();
-ownerLoader.load(
-  OWNER_ASSET_URL,
-  (gltf) => {
-    const model = gltf.scene;
-    model.name = 'demoAvatar';
-    model.position.set(0, 0, 0);
-    model.rotation.set(0, Math.PI * 0.15, 0);
-    model.scale.setScalar(0.4);
-    model.traverse((obj) => {
-      if (obj.isMesh) {
-        obj.castShadow = true;
-        obj.receiveShadow = true;
-      }
-    });
-    ownerRig.add(model);
-    ownerRig.visible = true;
-  },
-  undefined,
-  (error) => {
-    showAssetError(`Failed to load the imported owner asset at ${OWNER_ASSET_URL}. ${error && error.message ? error.message : String(error)}`);
-  }
-);
-
-const FIT_WALL = 1.75, FIT_MARGIN = 0.25;
+// Isometric, orthographic: the frame is fitted to the floor plus this much
+// wall, so the room fills it and the tops of the walls run off the top.
+const FIT_WALL = 1.75, FIT_MARGIN = 0.25; // m
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 80);
 const controls = new OrbitControls(camera, renderer.domElement);
 const HOME = { target: [0, FIT_WALL / 2, 0], offset: [15, 12.4, 15], zoom: 1.18 };
-const FOLLOW = 0.35;
-const follow = new THREE.Vector3();
-const followed = new THREE.Vector3();
+const FOLLOW = 0.35;                  // share of the cat's movement the view follows
+const follow = new THREE.Vector3();   // this frame's drift
+const followed = new THREE.Vector3(); // drift so far
 function homeCamera() {
   followed.set(0, 0, 0);
   controls.target.set(...HOME.target);
@@ -203,6 +237,7 @@ function homeCamera() {
 controls.enableDamping = true;
 controls.minZoom = 0.8;
 controls.maxZoom = 4.5;
+// A diorama, not a free camera: it turns a little either way and tilts a little.
 controls.minAzimuthAngle = Math.PI / 4 - 0.5;
 controls.maxAzimuthAngle = Math.PI / 4 + 0.5;
 controls.minPolarAngle = 0.7;
@@ -228,10 +263,12 @@ addEventListener('resize', resize);
 resize();
 homeCamera();
 
+// ------------------------------------------------------------------- room
 const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy() });
 scene.add(room.group);
 const meshFor = createPropLook(room.materials);
 
+// A soft blob under the cat: where it is, and where it will land.
 const catShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
   new THREE.MeshBasicMaterial({ map: softShadow({ strength: 0.6 }), transparent: true, depthWrite: false, toneMapped: false }));
 catShadow.userData.noAO = true;
@@ -239,7 +276,44 @@ catShadow.rotation.x = -Math.PI / 2;
 catShadow.renderOrder = 4;
 scene.add(catShadow);
 
-let physics, cat, catMesh, views, homes, touching, broken, noise, night = false;
+// The owner: model, animations, his view on the floor and the sign over his head.
+const ownerLook = createOwnerMesh({ onLoad: (model) => applyEnvironment(model, lights.mood.env) });
+scene.add(ownerLook.group);
+
+// Noise you can see: a ring on the floor where something was heard, as big as it was loud.
+const rings = [];
+const ringGeo = new THREE.RingGeometry(0.86, 1, 48);
+function ripple(n) {
+  let r = rings.find((x) => x.life <= 0);
+  if (!r) {
+    if (rings.length >= 24) return;
+    const mesh = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xfff1d0, transparent: true, depthWrite: false, toneMapped: false }));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.renderOrder = 5;
+    mesh.userData.noAO = true;
+    scene.add(mesh);
+    r = { mesh, life: 0 };
+    rings.push(r);
+  }
+  r.life = 1;
+  r.size = 0.25 + Math.min(1.6, n.heardLoudness * 1.4);
+  r.mesh.position.set(n.position.x, Math.max(0.015, n.position.y + 0.01), n.position.z);
+  r.mesh.visible = true;
+}
+function updateRings(dt) {
+  for (const r of rings) {
+    if (r.life <= 0) { r.mesh.visible = false; continue; }
+    r.life -= dt / 0.7;
+    const s = r.size * (1.15 - r.life * 0.85);
+    r.mesh.scale.set(s, s, s);
+    r.mesh.material.opacity = Math.max(0, r.life) * 0.7;
+  }
+}
+
+// ------------------------------------------------------------- simulation
+let physics, cat, catMesh, noise, owner, views, homes, broken, caughtAt = null, night = false;
+const round = createRound(tuning);
+try { round.setBest(Number(localStorage.getItem(BEST_KEY)) || 0); } catch {}
 
 function toast(text) {
   const t = $('toast');
@@ -249,37 +323,32 @@ function toast(text) {
   toast.timer = setTimeout(() => t.classList.remove('show'), 1500);
 }
 
-function reset() {
+/** A fresh room: every prop back in place, the cat at the door, the owner asleep. */
+function newWorld() {
   if (views) for (const mesh of views.values()) scene.remove(mesh);
   if (catMesh) scene.remove(catMesh.group);
+  for (const r of rings) r.life = 0;
   physics = createPhysicsWorld({ onBroken: (info) => { broken++; toast(`${info.kind[0].toUpperCase()}${info.kind.slice(1)} smashed`); } });
   const sceneProps = spawnRoomScene(physics);
-  cat = createCat(physics, { position: [0.3, tuning.cat.radius + 0.001, 0.9], heading: -0.6 });
+  cat = createCat(physics, { position: [0.3, tuning.cat.radius + 0.001, 0.9], heading: -0.6 }); // facing the viewer
   catMesh = createCatMesh(cat.dims);
   applyEnvironment(catMesh.group, lights.mood.env);
   scene.add(catMesh.group);
-  views = new Map();
-  homes = new Map(sceneProps.all.map((p) => [p.body, p.body.position.clone()]));
-  touching = new Set();
-  broken = 0;
-  noise = 0;
-
-  physics.onAfterStep(() => {
-    const now = new Map();
-    for (const c of physics.world.contacts) {
-      const key = c.bi.id < c.bj.id ? c.bi.id * 1e6 + c.bj.id : c.bj.id * 1e6 + c.bi.id;
-      let e = now.get(key);
-      if (!e) now.set(key, (e = { bodyA: c.bi, bodyB: c.bj, impulse: 0 }));
-      e.impulse += Math.abs(c.multiplier) * DT;
-    }
-    for (const [key, e] of now) {
-      if (touching.has(key) || e.impulse < 0.03 || physics.stepCount < 60) continue;
-      const loudness = physics.materials.loudness(physics.materials.nameOf(e.bodyA) ?? 'wood', physics.materials.nameOf(e.bodyB) ?? 'wood');
-      noise = Math.min(1, Math.max(noise, (Math.log10(1 + e.impulse * 6) * loudness) / 1.8));
-      if (e.bodyA !== cat.body && e.bodyB !== cat.body) physics.fracture.onImpact(e);
-    }
-    touching = new Set(now.keys());
+  // The chain the game is about: solver impulses -> noise -> wake meter -> the owner.
+  noise = createNoise(physics, {
+    listener: () => owner.head(),
+    onNoise: (n) => { owner.hear(n); ripple(n); },
   });
+  owner = createOwner(physics, {
+    cat,
+    wake: noise.meter,
+    onCaught: () => { caughtAt = performance.now(); round.caught(); toast('Caught!'); },
+  });
+  views = new Map();
+  // Where everything started, to count what the cat has knocked over.
+  homes = new Map(sceneProps.all.map((p) => [p.body, p.body.position.clone()]));
+  broken = 0;
+  caughtAt = null;
 }
 
 function setNight(on) {
@@ -290,30 +359,145 @@ function setNight(on) {
   applyEnvironment(scene, mood.env);
 }
 
+// ---------------------------------------------------------------- screens
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+function show(screen) {
+  for (const id of ['menu', 'pause', 'end']) $(id).hidden = id !== screen;
+  document.body.dataset.screen = screen ?? 'play';
+  const primary = { menu: 'playBtn', pause: 'resumeBtn', end: 'againBtn' }[screen];
+  if (primary) $(primary).focus();
+  else document.activeElement?.blur?.();
+}
+function bestLine() {
+  return round.best > 0 ? `Best chaos so far: ${round.best}` : '';
+}
+function play() {
+  newWorld();
+  round.start();
+  keys.clear();
+  homeCamera();
+  show(null);
+}
+function toMenu() {
+  newWorld();
+  round.toMenu();
+  keys.clear();
+  homeCamera();
+  $('bestLine').textContent = bestLine();
+  show('menu');
+}
+function pause() {
+  if (!round.playing) return;
+  round.pause();
+  keys.clear();
+  show('pause');
+}
+function resume() {
+  round.resume();
+  show(null);
+}
+function end() {
+  const won = round.state === 'won';
+  const record = round.score > 0 && round.score >= round.best && round.score > (Number(localStorage.getItem(BEST_KEY)) || 0);
+  try { localStorage.setItem(BEST_KEY, String(round.best)); } catch {}
+  $('endTitle').textContent = won ? 'Dawn!' : 'Caught!';
+  $('endTitle').className = won ? 'won' : 'caught';
+  $('endLine').textContent = won
+    ? 'The sun is up and he never got you. The last one awake, again.'
+    : `He scooped you up with ${clock(round.timeLeft)} to go before dawn.`;
+  $('endScore').textContent = round.score;
+  $('endKnocked').textContent = round.knocked;
+  $('endBroken').textContent = round.broken;
+  $('endTime').textContent = clock(round.elapsed);
+  $('endBest').textContent = record ? 'A new best!' : bestLine();
+  show('end');
+}
+$('playBtn').onclick = play;
+$('resumeBtn').onclick = resume;
+$('restartBtn').onclick = play;
+$('pauseMenuBtn').onclick = toMenu;
+$('againBtn').onclick = play;
+$('endMenuBtn').onclick = toMenu;
+
+// ------------------------------------------------------------------ input
 const keys = new Set();
 addEventListener('keydown', (e) => {
   if (e.repeat) return;
+  const screen = document.body.dataset.screen;
+  if (e.code === 'Escape') {
+    if (screen === 'play') pause();
+    else if (screen === 'pause') resume();
+    return;
+  }
+  if (screen !== 'play') {
+    // Enter always takes the screen's main button, wherever focus is; nothing reaches the cat.
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+      e.preventDefault();
+      ({ menu: play, pause: resume, end: play })[screen]?.();
+    }
+    if (e.code === 'KeyN') setNight(!night);
+    return;
+  }
   keys.add(e.code);
   if (CAT_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'KeyN') setNight(!night);
-  if (e.code === 'KeyR') reset();
+  if (e.code === 'KeyR') play();
   if (e.code === 'KeyH') homeCamera();
   if (e.code === 'KeyP') { pipeline.enabled = !pipeline.enabled; toast(pipeline.enabled ? 'Full lighting' : 'Plain render'); }
   if (e.code === 'KeyB') { pipeline.paint.enabled = !pipeline.paint.enabled; toast(pipeline.paint.enabled ? 'Painted' : 'Unpainted'); }
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
-addEventListener('blur', () => keys.clear());
+addEventListener('blur', () => { keys.clear(); pause(); });
 
+// ------------------------------------------------------------------- HUD
+const OWNER_TEXT = {
+  inBed: (s) => ({ asleep: 'Asleep', stirring: 'Stirring...', sittingUp: 'Sitting up!' })[s.stage] ?? 'Asleep',
+  gettingUp: () => 'Getting up!',
+  walking: (s) => (s.purpose === 'hide' ? 'Checking hiding spots' : s.purpose === 'bed' ? 'Going back to bed' : 'Coming to look'),
+  scanning: () => 'Looking around',
+  crouching: (s) => (s.spot?.id === 'underBed' ? 'Looking under the bed' : 'Looking under the desk'),
+  waiting: () => 'Listening, by the bed',
+  chasing: () => 'He sees you!',
+  lyingDown: () => 'Back to sleep',
+  caught: () => 'Caught you!',
+};
+const marks = tuning.owner.thresholds;
+for (const k of ['stirring', 'sittingUp', 'standing']) {
+  const u = document.createElement('u');
+  u.style.left = `${marks[k] * 100}%`;
+  $('wakeMeter').appendChild(u);
+}
+function hud() {
+  const s = owner.state;
+  $('score').textContent = round.score;
+  $('knocked').textContent = round.knocked;
+  $('broken').textContent = round.broken;
+  $('clock').textContent = clock(Math.ceil(round.timeLeft));
+  $('ownerText').textContent = OWNER_TEXT[s.motor]?.(s) ?? s.stage;
+  $('wakeFill').style.width = `${(noise.wake * 100).toFixed(1)}%`;
+  const alarmed = s.seesCat && s.motor !== 'inBed';
+  $('ownerPlaque').classList.toggle('alert', alarmed || s.motor === 'chasing' || s.motor === 'caught');
+  $('spotted').style.opacity = round.playing && s.seesCat ? (0.35 + 0.65 * s.spotted).toFixed(2) : s.motor === 'caught' ? '0.8' : '0';
+}
+
+// ------------------------------------------------------------------- loop
 const up = new THREE.Vector3();
 let acc = 0, sceneTime = 0;
 
+/** One rendered frame's worth of simulation and drawing. */
 function frame(dt) {
-  cat.setInput(inputFromKeys(keys));
-  acc += dt;
-  let n = 0;
-  while (acc >= DT && n < 8) { physics.step(); acc -= DT; n++; }
-  if (n === 8) acc = 0;
+  const playing = round.state === 'playing';
+  // The cat only listens to the keys while the round runs.
+  cat.setInput(playing ? inputFromKeys(keys) : { forward: 0, turn: 0, move: null, jump: false, swat: false });
+  // Fixed 120 Hz steps, capped; paused, nothing moves.
+  if (round.state !== 'paused') {
+    acc += dt;
+    let n = 0;
+    while (acc >= DT && n < 8) { physics.step(); acc -= DT; n++; }
+    if (n === 8) acc = 0;
+  }
 
+  // Props and debris: add meshes for new bodies, drop the ones that are gone.
   const live = new Set();
   for (const list of [physics.props, physics.debris]) {
     for (const record of list) {
@@ -334,9 +518,13 @@ function frame(dt) {
     if (!live.has(body)) { scene.remove(mesh); views.delete(body); }
   }
 
-  catMesh.update(dt, cat, { low: hidingSpotAt(cat.body.position) !== null });
+  const still = round.state === 'paused' ? 0 : dt;
+  catMesh.update(still, cat, { low: hidingSpotAt(cat.body.position) !== null });
+  ownerLook.update(still, owner.state);
   room.update((sceneTime += dt));
+  updateRings(still);
 
+  // The view drifts most of the way with the cat, so a close view never loses it.
   follow.set(cat.body.position.x * FOLLOW, Math.max(0, cat.body.position.y - cat.dims.radius) * 0.35, cat.body.position.z * FOLLOW).sub(followed);
   follow.multiplyScalar(Math.min(1, dt * 3.5));
   camera.position.add(follow);
@@ -352,6 +540,7 @@ function frame(dt) {
     catShadow.material.opacity = 1 / (1 + below.height * 1.4);
   }
 
+  // What the cat has done: moved from home or tipped over, plus everything smashed.
   let knocked = 0;
   for (const p of physics.props) {
     const home = homes.get(p.body);
@@ -359,20 +548,28 @@ function frame(dt) {
     up.set(0, 1, 0).applyQuaternion(p.body.quaternion);
     if (p.body.position.distanceTo(home) > 0.25 || up.y < 0.64) knocked++;
   }
-  knocked += homes.size - physics.props.filter((p) => homes.has(p.body)).length;
-  $('knocked').textContent = knocked;
-  $('broken').textContent = broken;
-  noise *= Math.exp(-dt / 1.6);
-  const lit = Math.ceil(noise * 6 - 0.02);
-  [...$('pips').children].forEach((pip, i) => { pip.className = i < lit ? (i >= 4 ? 'on hot' : 'on') : ''; });
+  knocked += homes.size - physics.props.filter((p) => homes.has(p.body)).length; // smashed ones count too
+  if (playing) {
+    round.update(dt);
+    round.tally(knocked, broken);
+  }
+  // The round is over: dawn at once, a catch after a moment to see it happen.
+  if (document.body.dataset.screen === 'play' && (round.state === 'won' || (round.state === 'caught' && performance.now() - caughtAt > 1400))) end();
+  hud();
 }
 
-reset();
+newWorld();
 setNight(false);
+$('bestLine').textContent = bestLine();
+show('menu');
 
+// The full lighting is the expensive part. If this machine can't hold it,
+// step down: fewer pixels first, then the plain render.
 const QUALITY = [() => renderer.setPixelRatio(Math.min(devicePixelRatio, 1.15)), () => renderer.setPixelRatio(1), () => { pipeline.enabled = false; }];
 let quality = 0, fpsFrames = 0, fpsTime = 0, slowFor = 0;
+const warmUntil = performance.now() + 4000; // shaders compile and the owner loads: not a slow machine
 function watchFrameRate(elapsed) {
+  if (performance.now() < warmUntil) return;
   fpsFrames++;
   fpsTime += elapsed;
   if (fpsTime < 0.5) return;
@@ -401,14 +598,14 @@ function tick() {
 }
 tick();
 
+// For driving the page from the console and from automated checks.
 window.game = {
-  get physics() { return physics; }, get cat() { return cat; }, keys, camera, controls, renderer, scene,
-  frame, reset, setNight, homeCamera,
+  get physics() { return physics; }, get cat() { return cat; }, get owner() { return owner; }, get noise() { return noise; },
+  round, keys, camera, controls, renderer, scene,
+  frame, play, toMenu, pause, resume, setNight, homeCamera,
   pipeline,
   render() { controls.update(); pipeline.render(); },
 };
 </script>
-
-
 </body>
 </html>
