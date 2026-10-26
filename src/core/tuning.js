@@ -128,4 +128,48 @@ export const tuning = {
     spin: 0.2,               // 0..1, how far off-centre the paw strikes (0 = no spin)
     maxSpin: 20,             // rad/s cap on a swatted body's spin
   },
+
+  // --- D: noise and the wake meter -------------------------------------------
+  noise: {
+    impulseFloor: 0.05,      // N·s; a new contact below this makes no sound
+    settleSteps: 60,         // steps at the start while everything is set down: silent
+    impulseScale: 0.3,       // N·s; loudness grows with ln(1 + impulse / impulseScale)
+    catFactor: 0.35,         // the cat's padded paws: its own bumps and landings are quieter
+    falloff: 2.5,            // m; heard loudness is halved this far from the owner's head
+    minHeard: 0.01,          // quieter than this, he doesn't hear it at all
+    wakeGain: 0.55,          // wake added per unit of heard loudness
+    wakeDecay: 0.035,        // wake lost per second once it has been quiet for decayDelay
+    decayDelay: 2.0,         // s of quiet before the meter starts to drain
+  },
+
+  // --- C: the owner -----------------------------------------------------------
+  owner: {
+    thresholds: { stirring: 0.2, sittingUp: 0.45, standing: 0.7, awake: 0.85 }, // wake level per stage
+    radius: 0.22,            // m, body collider
+    height: 1.72,            // m
+    eyeHeight: 1.6,          // m standing
+    sitEyeHeight: 1.4,       // m sitting up in bed (the mattress is 72 cm up)
+    crouchEyeHeight: 0.2,    // m when he crouches to look into a hiding spot
+    walkSpeed: 1.1,          // m/s
+    chaseSpeed: 1.9,         // m/s once he has seen the cat
+    turnRate: 4.0,           // rad/s
+    getUpTime: 1.4,          // s from sitting in bed to standing beside it
+    lieDownTime: 1.6,        // s
+    scanTime: 2.5,           // s he looks around where the noise was
+    crouchTime: 1.6,         // s he looks into a hiding spot
+    visionRange: 5.5,        // m
+    visionAngle: 0.85,       // rad, half-angle of his view
+    sitVisionRange: 3.5,     // m, sitting up in bed
+    spotTime: 1.2,           // s of continuous sight to catch the cat at mid range (0.8 s close, 1.8 s far)
+    catchRadius: 0.75,       // m; seen and this close, he scoops it up at once
+    sightWake: 0.9,          // wake per second while he sees the cat from bed
+    hearRedirect: 0.12,      // heard loudness that sends him to a new noise while he is up
+    repathTime: 0.4,         // s between path updates while chasing
+  },
+
+  // --- D: the round -----------------------------------------------------------
+  game: {
+    roundSeconds: 180,       // the night: last until dawn
+    points: { knocked: 10, broken: 40 },
+  },
 };
