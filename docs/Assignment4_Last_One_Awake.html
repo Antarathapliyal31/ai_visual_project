@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CS 549 Assignment 4: Last One Awake</title>
+<style>
+  @page { size: Letter; margin: 0.5in 0.55in; }
+  * { box-sizing: border-box; }
+  body { font: 9.1pt/1.31 "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 14.5pt; margin: 0 0 2pt; }
+  h2 { font-size: 11pt; margin: 8pt 0 3pt; padding-bottom: 1.5pt; border-bottom: 0.75pt solid #999; }
+  h3 { font-size: 9.2pt; margin: 5pt 0 1.5pt; }
+  p { margin: 0 0 4pt; }
+  .meta { color: #333; margin-bottom: 4pt; }
+  .links { border: 0.75pt solid #999; padding: 4pt 7pt; margin: 3pt 0 2pt; }
+  .links p { margin: 0 0 1.5pt; }
+  .links p:last-child { margin: 0; }
+  code { font: 8.2pt Menlo, Consolas, monospace; }
+  ul { margin: 0 0 3pt; padding-left: 13pt; }
+  li { margin-bottom: 1.6pt; }
+  table { border-collapse: collapse; width: 100%; margin: 3pt 0 4pt; font-size: 8.3pt; line-height: 1.25; }
+  th, td { border: 0.5pt solid #999; padding: 2pt 3.5pt; vertical-align: top; text-align: left; }
+  th { background: #eee; }
+  td.wk { white-space: nowrap; font-weight: 600; }
+  tr.buffer td { background: #f3f3f3; }
+  tr { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+  .who { color: #444; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>CS 549 · Assignment 4: Production Plan and Alpha Build</h1>
+<p class="meta"><b>Last One Awake</b>, a 3D stealth game about a cat wrecking an apartment at 3 a.m.<br>
+Group: Rushi Patel (leader), Dharm Patel, Antara Thapliyal, Christina Ross · Mentor: Danrui Li · State of the build on Oct 26, 2026.<br>
+Workstreams: <b>A</b> collision (Dharm), <b>B</b> dynamics and cat (Rushi), <b>C</b> owner AI (Christina), <b>D</b> core, noise, UI (Antara).</p>
+
+<div class="links">
+  <p><b>Playable alpha (hosted):</b> https://antarathapliyal31.github.io/ai_visual_project/harness/play.html</p>
+  <p><b>Build zip:</b> https://github.com/Antarathapliyal31/ai_visual_project/archive/refs/heads/Rushi.zip · Unzip, run <code>python3 -m http.server 8550</code> in the folder, open <code>localhost:8550/harness/play.html</code>.</p>
+  <p><b>Source:</b> https://github.com/Antarathapliyal31/ai_visual_project (branch <code>Rushi</code>) · <code>npm install &amp;&amp; npm test</code> runs 254 headless tests.</p>
+</div>
+
+<h2>1. Production schedule, Weeks 9–14</h2>
+<p>Week 9 is this build. Integration happens in Week 10, when the alpha branch merges into <code>main</code> and becomes the one deployed build. Week 14 is the buffer week: no new features.</p>
+<table>
+  <tr><th style="width:12%">Week</th><th style="width:45%">Engineering</th><th style="width:22%">Assets</th><th>Integration and milestone</th></tr>
+  <tr><td class="wk">9 · Oct 26–Nov 1</td>
+    <td>Game loop with menu, pause and caught/dawn endings; noise and wake meter on the solver's impulses; owner AI in the game (A* paths, sight cone, hiding checks, catch); cat room bounds and steering animation; five code-review fixes. <i>Done.</i></td>
+    <td>Owner model (CC0) and its clips wired in; view cone, noise rings, HUD.</td>
+    <td>Alpha hosted from <code>Rushi</code>; coupling proof passes headless.</td></tr>
+  <tr><td class="wk">10 · Nov 2–8</td>
+    <td><span class="who">C:</span> take over the owner AI, fix the two state-machine bugs from the review, turn the behaviour tree into a real runtime (selector, sequence, blackboard). <span class="who">D:</span> take over noise and UI; Vite build, CI running the tests, deploy from <code>main</code>. <span class="who">A:</span> owner and debris at 200–400 bodies. <span class="who">B:</span> landing marker under the cat; cat–owner push tuning.</td>
+    <td>Owner under the blanket in bed; a real sitting pose instead of kneeling.</td>
+    <td><b>Integration:</b> merge <code>Rushi</code> into <code>main</code>; one build, one URL.</td></tr>
+  <tr><td class="wk">11 · Nov 9–15</td>
+    <td>Performance: the painted pass at half its cost (half-res ambient occlusion, cheaper brush) so the full look holds 60 FPS; Firefox; the owner's hearing radius once awake; the cat's silhouette through furniture (Assignment 2 must-have).</td>
+    <td>UI icons and title art; owner sit-up and lie-down transitions.</td>
+    <td>All four mid-term proofs pass in Chrome and Firefox (moved from Oct 28).</td></tr>
+  <tr><td class="wk">12 · Nov 16–22</td>
+    <td>Difficulty tuning from playtests (catch time, wake gain, noise falloff); chaos score detail (loud crashes, chains); round summary screen.</td>
+    <td>Sound, a could-have: AI-generated effects for smashes, thuds, footsteps and a dawn alarm.</td>
+    <td>Feature freeze Nov 22; playtests with classmates.</td></tr>
+  <tr><td class="wk">13 · Nov 23–29</td>
+    <td>Fixes from playtests; stability with full debris; memory across many restarts. (Thanksgiving week: a light load.)</td>
+    <td>Final art pass; demo video storyboard.</td>
+    <td>Release candidate on <code>main</code>.</td></tr>
+  <tr class="buffer"><td class="wk">14 · Nov 30–Dec 6<br>Buffer week</td>
+    <td>Bug fixing, documentation and polish only. No new features.</td>
+    <td>None.</td>
+    <td>README, report and final video; final submission.</td></tr>
+</table>
+
+<h2>2. Release notes: changes since Assignment 3 (Oct 13)</h2>
+<h3>New features</h3>
+<ul>
+  <li><b>The full game loop.</b> Start menu; play; pause with <code>Esc</code> (resume, restart, menu); two endings, <b>Caught</b> (loss) or <b>Dawn</b> after a 3-minute night (win); play again; the best score is kept.</li>
+  <li><b>HUD.</b> Chaos score (10 per prop knocked over, 40 per one broken), time to dawn, the owner's state and wake meter, a red screen edge while he can see the cat, and rings on the floor where a noise was heard.</li>
+  <li><b>Noise and the wake meter, on the solver's impulses.</b> Each new contact's impulse becomes loudness on a log scale, scaled by the material pair (the cat's paws are padded), falls off with distance to the owner's head, and fills a meter that drains slowly.</li>
+  <li><b>The owner AI is in the game (our secondary pillar).</b> Christina's staged state machine and behaviour tree drive an animated owner. He sits up in bed, gets out, walks A* paths round the furniture, looks around where the noise was, kneels to check hiding spots, and chases and catches the cat. His sight is a cone confirmed by line-of-sight rays, so under the bed is a real hiding place and under the desk is not.</li>
+  <li><b>The coupling proof passes</b> (headless test): the same swat takes him to "sitting up" beside the bed (wake 0.55) and leaves him asleep from the far wall (0.10).</li>
+  <li><b>From the Assignment 3 feedback:</b> the cat eases into turns (its head leads, its feet step, it leans and its tail swings out), and a bounds check keeps it inside the room.</li>
+  <li><b>Also merged since Assignment 3:</b> the finished collision layer with its browser proof page (Dharm), the owner model (Christina) and the single-file MVP (Antara).</li>
+</ul>
+<h3>Bug fixes</h3>
+<ul>
+  <li>The cat could jump out of the scene: a jump off the 2 m bookshelf cleared the 2.8 m walls.</li>
+  <li>Five physics bugs from our Oct 22 code review: the sleep toggle was ignored on some worlds, debris ignored the sleep tuning, odd contact limits kept the wrong number of points, the solver's pass count read one low, and the game filtered the cat's contacts before fracture.</li>
+  <li>The game no longer lowers its own render quality while it is still loading.</li>
+</ul>
+<h3>Known issues</h3>
+<ul>
+  <li>Two bugs in the owner state machine itself (its stages never step down, and it moves the owner to the noise) are worked around in the game, not yet fixed in that module.</li>
+  <li>With the painted look on, the game runs at about 50–55 FPS on an Apple M4; the plain render (<code>P</code>) holds 60. Not yet tested in Firefox. No sound yet.</li>
+  <li>Asleep, the owner lies on top of the blanket, and sitting up is shown as kneeling.</li>
+  <li>Under the bed is always safe: he cannot lift the bed skirt.</li>
+  <li>In the single-file MVP the cat barely moves along the floor (cannon-es's stock friction); the game build is not affected.</li>
+</ul>
+<p><b>Stability:</b> 254 headless tests pass. In Chrome: a minute of random input, five restarts, and pausing and resuming, with no errors; scene objects and physics bodies stay constant across restarts.</p>
+
+</body>
+</html>
