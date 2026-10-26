@@ -20,6 +20,10 @@
 //    window) and remembers an early press for a moment.
 //  - Swat: a paw volume in front of the nose; the nearest props inside it get
 //    swat(). Nothing is swatted through a wall or shelf.
+//  - Room bounds: a backstop for whatever the colliders miss. The walls are
+//    2.8 m high and a jump off the 2 m bookshelf clears them, so every step
+//    both spheres are kept inside the walls' planes and under their tops, and
+//    a cat that still ends up below the floor goes back to where it last stood.
 //
 // update(dt) must run before world.step(), which createPhysicsWorld()'s
 // step() does for every cat made from it.
@@ -32,6 +36,7 @@
 
 import * as CANNON from 'cannon-es';
 import { STATIC, PROP, DEBRIS, CAT, ALL } from '../core/groups.js';
+import { ROOM } from '../collision/index.js';
 import { swat as applySwat } from './swat.js';
 
 const UP = new CANNON.Vec3(0, 1, 0);
@@ -61,6 +66,8 @@ const wrapAngle = (a) => {
  * @param {(hits: object[], paw: {x: number, y: number, z: number}) => void} [opts.onSwat]
  * @param {() => void} [opts.onJump]
  * @param {(impactSpeed: number) => void} [opts.onLand]  downward speed at touchdown, m/s
+ * @param {{minX: number, maxX: number, minZ: number, maxZ: number, wallHeight: number}} [opts.room]
+ *   the box to keep it in; default A's ROOM (walls' inner faces and their height)
  */
 export function createCat(physics, opts = {}) {
   const { world, raycast, tuning } = physics;
@@ -68,6 +75,7 @@ export function createCat(physics, opts = {}) {
   const sw = tuning.swat;
   const radius = cfg.radius;
   const halfLength = cfg.bodyHalfLength;
+  const room = opts.room ?? ROOM;
 
   const body = new CANNON.Body({
     mass: cfg.mass,
@@ -97,11 +105,14 @@ export function createCat(physics, opts = {}) {
     swatCooldown: 0,
     jumps: 0,
     swats: 0,
+    boundsHits: 0,      // steps the room bounds had to put it back
+    respawns: 0,        // times it fell out of the world and was put back where it stood
   };
   let heading = 0;
   let jumpBuffer = 0, jumpLock = 0;
   let prevJump = false, prevSwat = false;
   let fallSpeed = 0;
+  let safe = null; // the last place it stood inside the room
 
   // The cat walks through the bed skirt, so rays that stand in for its body
   // ignore the occluders too.
@@ -213,8 +224,48 @@ export function createCat(physics, opts = {}) {
     return hits;
   }
 
+  /**
+   * Keep the cat in the room. Both spheres stay inside the walls' planes (with
+   * a little slack, so in normal play the walls stop it first) and under the
+   * wall tops; only the part of the velocity that points out is removed.
+   * Returns true if it had to move the cat.
+   */
+  function keepInRoom() {
+    const b = cfg.bounds;
+    if (!b.enabled) return false;
+    const p = body.position, v = body.velocity;
+    if (p.y < b.respawnBelow) {
+      teleport(safe, heading);
+      state.respawns++;
+      return true;
+    }
+    const f = forward();
+    let lowX = -Infinity, highX = Infinity, lowZ = -Infinity, highZ = Infinity;
+    for (const k of halfLength > 0 ? [halfLength, -halfLength] : [0]) {
+      const x = p.x + f.x * k, z = p.z + f.z * k;
+      lowX = Math.max(lowX, room.minX + radius - b.slack - x);
+      highX = Math.min(highX, room.maxX - radius + b.slack - x);
+      lowZ = Math.max(lowZ, room.minZ + radius - b.slack - z);
+      highZ = Math.min(highZ, room.maxZ - radius + b.slack - z);
+    }
+    const dx = lowX > 0 ? lowX : highX < 0 ? highX : 0;
+    const dz = lowZ > 0 ? lowZ : highZ < 0 ? highZ : 0;
+    const dy = Math.min(0, room.wallHeight - radius - p.y);
+    if (dx === 0 && dz === 0 && dy === 0) return false;
+    p.x += dx;
+    p.y += dy;
+    p.z += dz;
+    if (dx * v.x < 0) v.x = 0;
+    if (dz * v.z < 0) v.z = 0;
+    if (dy < 0 && v.y > 0) v.y = 0;
+    body.aabbNeedsUpdate = true;
+    state.boundsHits++;
+    return true;
+  }
+
   /** Advance the controller by one substep. Runs before world.step(). */
   function update(dt) {
+    const putBack = keepInRoom();
     state.swatCooldown = Math.max(0, state.swatCooldown - dt);
     jumpLock = Math.max(0, jumpLock - dt);
     jumpBuffer = Math.max(0, jumpBuffer - dt);
@@ -227,6 +278,7 @@ export function createCat(physics, opts = {}) {
     if (state.grounded) {
       if (!wasGrounded && state.airTime > 0.05) opts.onLand?.(fallSpeed);
       state.airTime = 0;
+      if (!putBack) safe = { x: body.position.x, y: body.position.y, z: body.position.z };
     } else {
       state.airTime += dt;
       fallSpeed = Math.max(0, -body.velocity.y);
@@ -293,6 +345,7 @@ export function createCat(physics, opts = {}) {
   const p0 = opts.position ?? [0, radius + 0.001, 1.0];
   world.addBody(body);
   teleport(p0, opts.heading ?? Math.PI / 2);
+  safe = { x: body.position.x, y: body.position.y, z: body.position.z };
   const unhook = physics.onBeforeStep(update);
 
   function dispose() {

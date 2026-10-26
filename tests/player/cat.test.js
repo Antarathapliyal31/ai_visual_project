@@ -205,7 +205,67 @@ describe('cat against the room', () => {
         expect(p.z).toBeLessThan(ROOM.maxZ);
         expect(p.y).toBeGreaterThan(R - 0.03);
       });
+      // The walls stopped it: the room bounds never had to.
+      expect(cat.state.boundsHits).toBe(0);
     }
+  });
+
+  // The professor's review: the cat could jump out of the scene. The walls are
+  // 2.8 m high and the bookshelf top is 2.0 m, so a full jump from there
+  // (apex 3.1 m) cleared them.
+  const ON_BOOKSHELF = SURFACES.bookshelfTop + R + 0.01;
+  const leaps = [['north wall', [3.05, ON_BOOKSHELF, -2.85], NORTH], ['open east side', [3.2, ON_BOOKSHELF, -2.85], 0]];
+
+  it('cannot jump out over the walls: a leap off the bookshelf stays under the wall tops', () => {
+    for (const [label, position, heading] of leaps) {
+      const s = setup({ cat: { position, heading } });
+      s.cat.setInput({ forward: 1 });
+      tapJump(s);
+      let maxY = 0;
+      s.run(3, () => {
+        const p = s.cat.body.position;
+        maxY = Math.max(maxY, p.y);
+        expect(p.x, label).toBeLessThan(ROOM.maxX);
+        expect(p.z, label).toBeGreaterThan(ROOM.minZ);
+      });
+      // At most one step of overshoot past the wall tops before it is put back.
+      expect(maxY, label).toBeLessThan(ROOM.wallHeight - R + 0.04);
+      expect(s.cat.state.boundsHits, label).toBeGreaterThan(0);
+      expect(s.cat.state.grounded, label).toBe(true); // landed back on the bookshelf
+      expect(s.cat.body.position.y, label).toBeCloseTo(ON_BOOKSHELF - 0.01, 2);
+    }
+  });
+
+  it('without the room bounds the same leap clears the wall and falls out of the world', () => {
+    const [, position, heading] = leaps[0];
+    const s = setup({ tuning: freshTuning((t) => { t.cat.bounds.enabled = false; }), cat: { position, heading } });
+    s.cat.setInput({ forward: 1 });
+    tapJump(s);
+    s.run(3);
+    expect(s.cat.body.position.z).toBeLessThan(ROOM.minZ);
+    expect(s.cat.body.position.y).toBeLessThan(0);
+  });
+
+  it('puts the cat back inside if something moves it out of the room', () => {
+    const s = setup();
+    s.cat.teleport([ROOM.maxX + 1, FLOOR_Y, 0], 0); // facing +x, past the open east side
+    s.run(0.25);
+    const p = s.cat.body.position;
+    expect(p.x).toBeLessThan(ROOM.maxX - NOSE + tuning.cat.bounds.slack + 1e-6);
+    expect(p.y).toBeCloseTo(R, 2);
+    expect(s.cat.state.boundsHits).toBeGreaterThan(0);
+  });
+
+  it('respawns where it last stood if it ever falls out of the world', () => {
+    const s = setup({ cat: { position: [-1.0, FLOOR_Y, 1.5], heading: NORTH } });
+    s.run(0.5);
+    const stood = s.cat.body.position.clone();
+    s.cat.teleport([-1.0, -3, 1.5]); // under the floor
+    s.run(2 / 120);
+    expect(s.cat.state.respawns).toBe(1);
+    expect(s.cat.body.position.distanceTo(stood)).toBeLessThan(0.01);
+    s.run(0.5);
+    expect(s.cat.state.grounded).toBe(true);
   });
 
   it('stays upright whatever hits it', () => {

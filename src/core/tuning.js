@@ -109,6 +109,11 @@ export const tuning = {
     coyoteTime: 0.08,        // s after leaving a ledge when a jump still counts
     jumpBuffer: 0.10,        // s a jump press is remembered before landing
     groundProbe: 0.04,       // m the ground rays reach below the feet
+    bounds: {                // backstop that keeps the cat inside A's ROOM, walls and wall tops
+      enabled: true,
+      slack: 0.03,           // m a sphere may pass a wall's plane before it is put back (the wall stops it first)
+      respawnBelow: -1.0,    // m; below this it has fallen out of the world: back to where it last stood
+    },
   },
 
   // --- B: swat -----------------------------------------------------------

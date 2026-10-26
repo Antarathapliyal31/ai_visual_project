@@ -15,10 +15,35 @@
 // update() only reads the controller's state: legs step with the speed, the
 // tail sways, the body stretches in the air, a front paw swipes on a swat,
 // and it breathes and blinks when it stands still.
+//
+// Steering is eased rather than copied: the drawn body follows the collider's
+// heading through a critically damped spring, so a turn starts and stops
+// smoothly instead of snapping round like a turntable. The head stays on the
+// true heading, so it leads and the body follows; turning on the spot steps
+// the feet; at speed the body leans into the turn and pitches with speed
+// changes, and the tail swings out. The lag is a few degrees and visual only:
+// the collider, the paw and the swat still use the controller's heading.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as tex from './textures.js';
+
+const UP = new THREE.Vector3(0, 1, 0);
+const TURN_EASE = 30;  // rad/s: how fast the drawn body catches up with the heading (12 degrees behind at full turn)
+const PIVOT = 0.16;    // m the feet travel per radian when it turns on the spot
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/**
+ * One exact step of a critically damped spring towards a fixed target: it
+ * eases in and out and never overshoots, whatever the frame time.
+ * @returns {[number, number]} the new value and its rate
+ */
+function spring(x, v, target, w, dt) {
+  const y = x - target, e = Math.exp(-w * dt), c = v + w * y;
+  return [target + (y + c * dt) * e, (v - w * dt * c) * e];
+}
 
 const BASE = new THREE.Color(0xa67f4f), BACK = new THREE.Color(0x7f5f3b), DARK = new THREE.Color(0x33241a);
 const LIGHT = new THREE.Color(0xf0dfbf), PINK = new THREE.Color(0xd98f8a);
@@ -221,7 +246,8 @@ export function createCatMesh(dims) {
     if (o.isMesh) o.castShadow = o.receiveShadow = true;
   });
 
-  let stride = 0, time = 0, swat = 0, lastSwats = 0, air = 0, turn = 0, lastHeading = null, lowTail = 0, blink = 0, nextBlink = 2;
+  let stride = 0, time = 0, swat = 0, lastSwats = 0, air = 0, lowTail = 0, blink = 0, nextBlink = 2;
+  let yaw = null, yawRate = 0, lean = 0, surge = 0, lastSpeed = 0, tailSwing = 0;
   const SWAT_TIME = 0.22;
 
   return {
@@ -233,20 +259,26 @@ export function createCatMesh(dims) {
      */
     update(dt, cat, where = {}) {
       group.position.copy(cat.body.position);
-      group.quaternion.copy(cat.body.quaternion);
       time += dt;
-      const speed = cat.state.speed;
-      const moving = Math.min(1, speed / 1.2);
-      stride += speed * dt * 11;
 
-      if (lastHeading !== null && dt > 0) {
-        let d = cat.heading - lastHeading;
-        if (d > Math.PI) d -= 2 * Math.PI;
-        if (d < -Math.PI) d += 2 * Math.PI;
-        turn += (d / dt - turn) * Math.min(1, dt * 10);
-      }
-      lastHeading = cat.heading;
+      // Steering, eased: the body chases the heading; `lag` is how far behind it is.
+      if (yaw === null) yaw = cat.heading;
+      [yaw, yawRate] = spring(yaw, yawRate, yaw + wrap(cat.heading - yaw), TURN_EASE, dt);
+      yaw = wrap(yaw);
+      group.quaternion.setFromAxisAngle(UP, yaw);
+      const lag = wrap(cat.heading - yaw);
+
+      const speed = cat.state.speed;
+      // Turning on the spot walks the feet round too.
+      const gait = speed + Math.abs(yawRate) * PIVOT;
+      const moving = Math.min(1, gait / 1.2);
+      stride += gait * dt * 11;
       air += ((cat.state.grounded ? 0 : 1) - air) * Math.min(1, dt * 14);
+      // Lean into a turn at speed (left is -z for a cat facing +x), pitch with speed changes, tail swings out.
+      lean += (clamp(-yawRate * speed * 0.03, -0.3, 0.3) * (1 - air) - lean) * Math.min(1, dt * 10);
+      surge += ((dt > 0 ? (speed - lastSpeed) / dt : 0) - surge) * Math.min(1, dt * 6);
+      lastSpeed = speed;
+      tailSwing += (clamp(yawRate * 0.16, -0.55, 0.55) - tailSwing) * Math.min(1, dt * 5);
       lowTail += ((where.low ? 1 : 0) - lowTail) * Math.min(1, dt * 8);
       if (cat.state.swats !== lastSwats) { lastSwats = cat.state.swats; swat = SWAT_TIME; }
       swat = Math.max(0, swat - dt);
@@ -261,8 +293,10 @@ export function createCatMesh(dims) {
       const still = 1 - moving;
       torso.scale.set(1, 1 + Math.sin(time * 2.4) * 0.012 * still, 1 + Math.sin(time * 2.4) * 0.018 * still);
       body.position.y = Math.abs(Math.sin(stride)) * S(0.006) * moving * (1 - air);
-      body.rotation.z = -0.14 * air * Math.sign(cat.body.velocity.y || 1);
-      head.rotation.y = Math.max(-0.55, Math.min(0.55, turn * 0.1));
+      body.rotation.x = lean;
+      body.rotation.z = -0.14 * air * Math.sign(cat.body.velocity.y || 1) + clamp(-surge * 0.005, -0.07, 0.07) * (1 - air);
+      // The head looks where the cat is really going, a little further into the turn.
+      head.rotation.y = clamp(lag + yawRate * 0.05, -0.6, 0.6);
       head.rotation.z = Math.sin(stride * 2) * 0.03 * moving + Math.sin(time * 0.9) * 0.02 * still;
 
       // Tail: up and curled when it has room, streaming back at a run, flat where there is no headroom.
@@ -270,7 +304,7 @@ export function createCatMesh(dims) {
       tail[0].rotation.z = lift * (1 - lowTail) + 1.55 * lowTail;
       tail.forEach((joint, i) => {
         if (i > 0) joint.rotation.z = (-0.21 - 0.05 * Math.sin(time * 1.3 + i * 0.5)) * (1 - lowTail) * (1 - 0.6 * moving);
-        joint.rotation.x = Math.sin(time * 2.1 + i * 0.6) * (0.05 + 0.03 * i) * (1 - 0.5 * moving);
+        joint.rotation.x = Math.sin(time * 2.1 + i * 0.6) * (0.05 + 0.03 * i) * (1 - 0.5 * moving) + tailSwing * (i === 0 ? 0.5 : 0.1);
       });
 
       // Blink now and then; ears flick with it.
