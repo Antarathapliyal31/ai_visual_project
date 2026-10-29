@@ -1,0 +1,11 @@
+Asset: harness/assets/human-female.glb
+Status: current project asset only; not a rigged, poseable character
+Source: generated procedurally in this repository with tools/generate_owner_glb.py
+License: project-local custom asset; no upstream third-party license metadata was provided
+Usage: this file is for local prototype use only until a suitable licensed humanoid GLB with a bone rig is supplied
+
+Required replacement for final feature work:
+- a proper stylized humanoid GLB/GLTF with a bone hierarchy (skin/joints)
+- recognizable face, hair, and clothing
+- a clear license or provenance record
+- ideally an animation or a rig that can be posed in a sleeping layout without rebuilding from primitive shapes

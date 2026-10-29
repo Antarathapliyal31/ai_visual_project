@@ -5,111 +5,133 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Owner Preview</title>
   <style>
-    html, body { margin:0; height:100%; background:#d9d6d2; overflow:hidden; }
-    #stage { width:100vw; height:100vh; }
-    canvas { display:block; width:100%; height:100%; }
-    #label {
-      position:fixed; left:18px; top:18px; z-index:10;
-      background:rgba(24,24,24,.45); color:white; border:1px solid rgba(255,255,255,.25);
-      padding:8px 12px; border-radius:10px; font: 600 14px/1.2 'Segoe UI', sans-serif; letter-spacing:.02em;
+    :root {
+      --paper: #d9d6d2;
+      --ink: #111111;
+      --muted: #1f1f1f;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    .profile {
+      width: min(1200px, calc(100vw - 120px));
+      margin-left: 56px;
+      margin-top: 52px;
+      margin-bottom: 48px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(4rem, 6vw, 8rem);
+      line-height: 0.9;
+      letter-spacing: -0.07em;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    .dept,
+    .school {
+      margin-top: 18px;
+      font-size: clamp(2.1rem, 2.4vw, 3.3rem);
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+      font-weight: 400;
+      color: var(--ink);
+    }
+
+    .details {
+      margin-top: 30px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .line {
+      font-size: clamp(1.9rem, 2.3vw, 3.2rem);
+      line-height: 1.2;
+      letter-spacing: -0.05em;
+      font-weight: 400;
+      color: var(--ink);
+      white-space: normal;
+    }
+
+    .line strong {
+      font-weight: 800;
+    }
+
+    .links {
+      display: flex;
+      gap: 22px;
+      margin-top: 44px;
+      flex-wrap: wrap;
+    }
+
+    .link {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #ffffff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      font-size: 2rem;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      font-weight: 700;
+      text-transform: lowercase;
+    }
+
+    @media (max-width: 900px) {
+      .profile {
+        width: calc(100vw - 32px);
+        margin-left: 18px;
+        margin-top: 28px;
+      }
+
+      .link {
+        width: 84px;
+        height: 84px;
+        font-size: 1.6rem;
+      }
     }
   </style>
 </head>
 <body>
-  <div id="label">Owner asset preview</div>
-  <div id="stage"></div>
+  <main class="profile" aria-label="Christina Ross profile">
+    <h1>Christina Ross</h1>
 
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-    }
-  }
-  </script>
+    <div class="dept">Department of Computer Science</div>
+    <div class="school">Rutgers-New Brunswick</div>
 
-  <script type="module">
-    import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    <div class="details">
+      <div class="line"><strong>Address:</strong> 494 Spotswood Englishtown Rd, Monroe Township, NJ 08831</div>
+      <div class="line"><strong>Email:</strong> christina.ross@rutgers.edu</div>
+    </div>
 
-    const stage = document.getElementById('stage');
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    stage.appendChild(renderer.domElement);
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#d9d6d2');
-
-    const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 50);
-    camera.position.set(0.8, 1.5, 4.2);
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.enablePan = false;
-    controls.target.set(0, 0.75, 0);
-
-    const hemi = new THREE.HemisphereLight('#ffffff', '#b4b2b0', 1.1);
-    scene.add(hemi);
-    const key = new THREE.DirectionalLight('#ffffff', 1.5);
-    key.position.set(2, 3, 2);
-    scene.add(key);
-
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(2.6, 64),
-      new THREE.MeshStandardMaterial({ color: '#e8e3df', roughness: 0.95, metalness: 0.02 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.95;
-    scene.add(ground);
-
-    const OWNER_ASSET_URL = '../demo/public/models/demo-avatar.glb?v=quaternius-2026-10-15';
-    const loader = new GLTFLoader();
-    loader.load(OWNER_ASSET_URL, (gltf) => {
-      const model = gltf.scene;
-      model.scale.setScalar(0.4);
-      model.rotation.y = Math.PI * 0.18;
-      model.position.y = -0.12;
-      scene.add(model);
-
-      model.traverse((obj) => {
-        if (obj.isMesh) {
-          obj.castShadow = true;
-          obj.receiveShadow = true;
-        }
-      });
-    }, undefined, (error) => {
-      const message = `Failed to load the imported owner asset at ${OWNER_ASSET_URL}. ${error && error.message ? error.message : String(error)}`;
-      console.error(message);
-      const panel = document.createElement('div');
-      panel.style.position = 'fixed';
-      panel.style.left = '18px';
-      panel.style.top = '18px';
-      panel.style.zIndex = '20';
-      panel.style.maxWidth = '560px';
-      panel.style.background = 'rgba(30, 20, 20, 0.85)';
-      panel.style.color = '#fff';
-      panel.style.border = '1px solid rgba(255,255,255,0.2)';
-      panel.style.padding = '10px 14px';
-      panel.style.borderRadius = '10px';
-      panel.textContent = message;
-      document.body.appendChild(panel);
-    });
-
-    function tick() {
-      controls.update();
-      renderer.render(scene, camera);
-      requestAnimationFrame(tick);
-    }
-    tick();
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  </script>
+    <nav class="links" aria-label="Social links">
+      <a class="link" href="#" aria-label="LinkedIn">in</a>
+      <a class="link" href="#" aria-label="Educational profile">edu</a>
+      <a class="link" href="#" aria-label="CV">cv</a>
+      <a class="link" href="#" aria-label="GitHub">gh</a>
+    </nav>
+  </main>
 </body>
 </html>
