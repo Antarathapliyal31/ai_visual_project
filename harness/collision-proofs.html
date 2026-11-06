@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collision Proofs</title>
+<!--
+  Workstream A's proofs in the browser: the tunneling proof and the 200-400
+  body broadphase profile, run with the same scenario code as the Vitest
+  suites. Open it in Chrome and in Firefox; each run can be saved as a log.
+
+  Serve the repo root over HTTP (ES modules don't load from file://):
+    python3 -m http.server 8550
+  then open http://localhost:8550/harness/collision-proofs.html
+  Add ?quick to skip the failure-speed ramps.
+-->
+<style>
+  :root { --bg:#14111c; --panel:#1c1728; --ink:#f3e7d3; --muted:#a89fb3; --line:#3b3050;
+          --green:#6ac47a; --red:#e05a3a; --amber:#e8a33c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:980px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; }
+  td.num { font-variant-numeric:tabular-nums; }
+  .pass { color:var(--green); } .fail { color:var(--red); } .run { color:var(--amber); } .info { color:var(--muted); }
+  .bar { display:flex; gap:8px; align-items:center; margin:14px 0; flex-wrap:wrap; }
+  button { font:inherit; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:#6a5888; }
+  button:disabled { opacity:.5; cursor:default; }
+  pre { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; max-height:240px; font-size:11px; }
+  .wrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Collision proofs (Workstream A)</h1>
+  <p class="sub" id="env"></p>
+  <div class="bar">
+    <button id="run" disabled>Run again</button>
+    <button id="save" disabled>Save log</button>
+    <span id="status" class="run">Starting…</span>
+  </div>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Check</th><th>Result</th><th>Numbers</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <pre id="log" hidden></pre>
+</main>
+
+<script type="importmap">
+{
+  "imports": {
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+<script type="module">
+import { createTunnelingScenario, runScenario, findFailureSpeed } from './scenarios/tunneling.js';
+import { createBroadphasePerfScenario } from './scenarios/broadphasePerf.js';
+
+const $ = (id) => document.getElementById(id);
+const quick = new URLSearchParams(location.search).has('quick');
+const browser = (() => {
+  const ua = navigator.userAgent;
+  const m = ua.match(/Firefox\/([\d.]+)/) || ua.match(/Edg\/([\d.]+)/) || ua.match(/Chrome\/([\d.]+)/) || ua.match(/Version\/([\d.]+).*Safari/);
+  const name = /Firefox/.test(ua) ? 'Firefox' : /Edg\//.test(ua) ? 'Edge' : /Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'Unknown';
+  return `${name} ${m ? m[1] : ''}`.trim();
+})();
+$('env').textContent = `${browser} · ${navigator.platform || ''} · ${navigator.hardwareConcurrency || '?'} threads`;
+
+const perfRow = (w) => `${w.stepMs.toFixed(2)} ms step (max ${w.maxStepMs.toFixed(1)}), ${w.broadphaseMs.toFixed(2)} ms broadphase, ${w.broadphasePairs} pairs, ${w.narrowPairs} narrow (max ${w.maxNarrowPairs}), ${w.awake} awake`;
+
+// Each check returns {pass: true|false|null, text, data}; null = informational.
+const CHECKS = [
+  ['Tunneling: 100 swats at 12 m/s, guard on', () => {
+    const r = runScenario(createTunnelingScenario({ speed: 12, swats: 100, guard: true }));
+    return { pass: r.pass, text: `${r.passThroughs} of ${r.swats} pass through, ${r.guardClamps} guard clamps`, data: r };
+  }],
+  ['Tunneling control: same swats, guard off', () => {
+    const r = runScenario(createTunnelingScenario({ speed: 12, swats: 100, guard: false }));
+    return { pass: r.passThroughs > 0, text: `${r.passThroughs} of ${r.swats} pass through (must be > 0, or the test proves nothing)`, data: r };
+  }],
+  ...(quick ? [] : [
+    ['Failure speed, guard off', () => {
+      const r = findFailureSpeed({ guard: false, from: 4, to: 40, stepBy: 2 });
+      return { pass: null, text: `fails at ${r.failureSpeed ?? '> 40'} m/s`, data: r.failureSpeed };
+    }],
+    ['Failure speed, guard on', () => {
+      const r = findFailureSpeed({ guard: true, from: 12, to: 100, stepBy: 4 });
+      return { pass: r.failureSpeed === null || r.failureSpeed > 12, text: `fails at ${r.failureSpeed ?? '> 100'} m/s`, data: r.failureSpeed };
+    }],
+  ]),
+  ...[200, 400].flatMap((bodies) => [
+    [`Broadphase, ${bodies} bodies: uniform grid @ 0.5 m`, () => {
+      const r = runScenario(createBroadphasePerfScenario({ bodies, broadphase: 'grid', cellSize: 0.5 }));
+      const ok = r.escaped === 0 && r.active.narrowPairs <= 210 && r.settled.narrowPairs < 200;
+      return { pass: ok, text: `active: ${perfRow(r.active)}<br>settled: ${perfRow(r.settled)}`, data: r };
+    }],
+    [`Broadphase, ${bodies} bodies: naive (reference)`, () => {
+      const r = runScenario(createBroadphasePerfScenario({ bodies, broadphase: 'naive' }));
+      return { pass: null, text: `active: ${perfRow(r.active)}<br>settled: ${perfRow(r.settled)}`, data: r };
+    }],
+  ]),
+];
+
+const yieldFrame = () => new Promise((res) => setTimeout(res, 30));
+let log = null;
+
+async function runAll() {
+  $('run').disabled = $('save').disabled = true;
+  document.body.dataset.done = 'false';
+  const rows = $('rows');
+  rows.innerHTML = CHECKS.map(([name], i) => `<tr><td>${name}</td><td id="r${i}" class="info">waiting</td><td id="n${i}" class="num"></td></tr>`).join('');
+  log = { browser, userAgent: navigator.userAgent, startedAt: new Date().toISOString(), results: [] };
+  let failed = 0;
+  for (let i = 0; i < CHECKS.length; i++) {
+    const [name, fn] = CHECKS[i];
+    $(`r${i}`).textContent = 'running…';
+    $(`r${i}`).className = 'run';
+    $('status').textContent = `Running ${i + 1} of ${CHECKS.length}…`;
+    await yieldFrame();
+    const t0 = performance.now();
+    let res;
+    try { res = fn(); } catch (err) { res = { pass: false, text: String(err && err.stack || err), data: null }; }
+    const secs = (performance.now() - t0) / 1000;
+    const label = res.pass === null ? 'info' : res.pass ? 'pass' : 'fail';
+    if (res.pass === false) failed++;
+    $(`r${i}`).textContent = label;
+    $(`r${i}`).className = label;
+    $(`n${i}`).innerHTML = `${res.text} <span class="info">(${secs.toFixed(1)} s)</span>`;
+    log.results.push({ name, result: label, seconds: +secs.toFixed(2), text: res.text.replace(/<br>/g, ' | '), data: res.data });
+  }
+  log.finishedAt = new Date().toISOString();
+  log.passed = failed === 0;
+  $('status').textContent = failed ? `${failed} check(s) failed` : 'All checks pass';
+  $('status').className = failed ? 'fail' : 'pass';
+  $('log').textContent = JSON.stringify(log, null, 2);
+  $('log').hidden = false;
+  $('run').disabled = $('save').disabled = false;
+  document.body.dataset.done = 'true';
+  document.title = `Collision Proofs: ${failed ? 'FAIL' : 'PASS'}`;
+}
+
+$('run').onclick = runAll;
+$('save').onclick = () => {
+  const blob = new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `collision-proofs-${browser.split(' ')[0].toLowerCase()}-${log.startedAt.slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+runAll();
+</script>
+</body>
+</html>

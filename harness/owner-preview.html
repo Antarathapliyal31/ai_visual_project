@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Owner Preview</title>
+  <style>
+    :root {
+      --paper: #d9d6d2;
+      --ink: #111111;
+      --muted: #1f1f1f;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    .profile {
+      width: min(1200px, calc(100vw - 120px));
+      margin-left: 56px;
+      margin-top: 52px;
+      margin-bottom: 48px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(4rem, 6vw, 8rem);
+      line-height: 0.9;
+      letter-spacing: -0.07em;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    .dept,
+    .school {
+      margin-top: 18px;
+      font-size: clamp(2.1rem, 2.4vw, 3.3rem);
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+      font-weight: 400;
+      color: var(--ink);
+    }
+
+    .details {
+      margin-top: 30px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .line {
+      font-size: clamp(1.9rem, 2.3vw, 3.2rem);
+      line-height: 1.2;
+      letter-spacing: -0.05em;
+      font-weight: 400;
+      color: var(--ink);
+      white-space: normal;
+    }
+
+    .line strong {
+      font-weight: 800;
+    }
+
+    .links {
+      display: flex;
+      gap: 22px;
+      margin-top: 44px;
+      flex-wrap: wrap;
+    }
+
+    .link {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #ffffff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      font-size: 2rem;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      font-weight: 700;
+      text-transform: lowercase;
+    }
+
+    @media (max-width: 900px) {
+      .profile {
+        width: calc(100vw - 32px);
+        margin-left: 18px;
+        margin-top: 28px;
+      }
+
+      .link {
+        width: 84px;
+        height: 84px;
+        font-size: 1.6rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="profile" aria-label="Christina Ross profile">
+    <h1>Christina Ross</h1>
+
+    <div class="dept">Department of Computer Science</div>
+    <div class="school">Rutgers-New Brunswick</div>
+
+    <div class="details">
+      <div class="line"><strong>Address:</strong> 494 Spotswood Englishtown Rd, Monroe Township, NJ 08831</div>
+      <div class="line"><strong>Email:</strong> christina.ross@rutgers.edu</div>
+    </div>
+
+    <section class="experience" aria-label="Experience">
+      <div class="line"><strong>IT Administrator | LS Direct</strong></div>
+      <div class="line"><strong>August 2026 – Present</strong></div>
+      <ul>
+        <li>Provide technical support and troubleshooting for MFA, Active Directory, VPN connectivity, Microsoft 365, and system access issues.</li>
+        <li>Manage SFTP connections, configure client folder permissions, troubleshoot file transfers, and support server migrations.</li>
+        <li>Develop and optimize an automated local data removal dashboard to streamline data removal requests, reduce manual processing, and improve workflow accuracy.</li>
+        <li>Administer user accounts, access permissions, and client onboarding/offboarding across internal systems, ensuring secure access management.</li>
+      </ul>
+    </section>
+
+    <nav class="links" aria-label="Social links">
+      <a class="link" href="#" aria-label="LinkedIn">in</a>
+      <a class="link" href="#" aria-label="Educational profile">edu</a>
+      <a class="link" href="#" aria-label="CV">cv</a>
+      <a class="link" href="#" aria-label="GitHub">gh</a>
+    </nav>
+  </main>
+</body>
+</html>

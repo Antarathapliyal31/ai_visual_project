@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collision Layer Demo</title>
+<!--
+  Live demo of Workstream A (collision layer). Runs the real modules from
+  src/collision/ and the proof scenarios from harness/scenarios/ in the
+  browser; Three.js is only used here for drawing.
+
+  Serve the repo root over HTTP (ES modules don't load from file://):
+    python3 -m http.server 8550
+  then open http://localhost:8550/harness/collision-demo.html
+-->
+<style>
+  :root { --bg:#14111c; --panel:rgba(28,23,40,.94); --ink:#f3e7d3; --muted:#a89fb3; --line:#3b3050;
+          --amber:#e8a33c; --green:#6ac47a; --red:#e05a3a; --blue:#7fa8e0; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
+               font:13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  canvas { display:block; }
+  #panel { position:fixed; top:12px; left:12px; width:330px; max-height:calc(100% - 24px); overflow:auto;
+           background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  h1 { font-size:14px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:11px; margin:0 0 10px; }
+  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px; }
+  button { font:inherit; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:6px;
+           padding:6px 8px; cursor:pointer; text-align:left; }
+  button:hover { border-color:#6a5888; }
+  button.on { background:var(--amber); color:#1a1020; border-color:var(--amber); font-weight:600; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
+  .row label { color:var(--muted); }
+  .row input[type=range] { width:150px; }
+  select { font:inherit; background:#1c1628; color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:3px; }
+  .btns { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+  .section { margin-top:10px; padding-top:8px; border-top:1px solid var(--line); }
+  .section h2 { font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); margin:0 0 6px; font-weight:600; }
+  #stats { display:grid; grid-template-columns:1fr auto; gap:3px 10px; font-variant-numeric:tabular-nums; }
+  #stats .k { color:var(--muted); }
+  .pass { color:var(--green); } .fail { color:var(--red); } .warn { color:var(--amber); }
+  #help { color:var(--muted); font-size:11.5px; }
+  #help b { color:var(--ink); font-weight:600; }
+  #banner { position:fixed; left:50%; top:16%; transform:translateX(-50%); padding:12px 26px; background:var(--panel);
+            border:1px solid var(--line); border-radius:10px; font-size:20px; font-weight:600; display:none; pointer-events:none; }
+  #legend { position:fixed; right:12px; bottom:12px; background:var(--panel); border:1px solid var(--line); border-radius:10px;
+            padding:8px 12px; font-size:11.5px; color:var(--muted); }
+  #legend span { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+  @media (max-width: 640px) { #panel { width:calc(100% - 24px); max-height:45%; } #legend { display:none; } }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Collision layer: live demo</h1>
+  <p class="sub">Workstream A · real modules from src/collision</p>
+  <div class="tabs">
+    <button data-mode="tunnel">Tunneling proof</button>
+    <button data-mode="sight">Sight &amp; hiding</button>
+    <button data-mode="fracture">Fracture</button>
+    <button data-mode="perf">Broadphase 400</button>
+  </div>
+  <div id="controls"></div>
+  <div class="section"><h2>Live numbers</h2><div id="stats"></div></div>
+  <div class="section"><h2>What you're seeing</h2><div id="help"></div></div>
+</div>
+<div id="banner"></div>
+<div id="legend">
+  <div><span style="background:#7a6a92"></span>static collider</div>
+  <div><span style="background:#ff9f43"></span>occluder (blocks sight, not bodies)</div>
+  <div><span style="background:#4f86d9"></span>hiding volume</div>
+  <div><span style="background:#e8a33c"></span>dynamic body · dim = sleeping</div>
+  <div><span style="background:#ff7b54"></span>debris</div>
+  <div><span style="background:#47d18c"></span>grid cell / guard clamp</div>
+  <div><span style="background:#ff4d6d"></span>contact point / pass-through</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as CANNON from 'cannon-es';
+import {
+  UniformGridBroadphase, createRaycaster, createSweptGuard, createFracture,
+  hidingSpotAt, lineOfSight, buildStaticGeometry, HIDING_VOLUMES, narrowPairCount,
+} from '../src/collision/index.js';
+import { STATIC, PROP, CAT } from '../src/core/groups.js';
+import { createTunnelingScenario, SHELF } from './scenarios/tunneling.js';
+import { createBroadphasePerfScenario } from './scenarios/broadphasePerf.js';
+
+const DT = 1 / 120;
+const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------------ three
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14111c);
+scene.add(new THREE.HemisphereLight(0xc9d6ff, 0x2a2233, 1.1));
+const sun = new THREE.DirectionalLight(0xfff0dd, 1.4);
+sun.position.set(4, 8, 5);
+scene.add(sun);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.01, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+function frameCamera(pos, target) {
+  camera.position.set(...pos);
+  controls.target.set(...target);
+  controls.update();
+}
+
+// ---------------------------------------------------- body -> mesh views
+function convexGeometry(shape) {
+  const pos = [];
+  for (const f of shape.faces) {
+    for (let i = 1; i < f.length - 1; i++) {
+      for (const k of [f[0], f[i], f[i + 1]]) {
+        const v = shape.vertices[k];
+        pos.push(v.x, v.y, v.z);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+function geometryFor(shape) {
+  const T = CANNON.Shape.types;
+  switch (shape.type) {
+    case T.BOX: return new THREE.BoxGeometry(shape.halfExtents.x * 2, shape.halfExtents.y * 2, shape.halfExtents.z * 2);
+    case T.SPHERE: return new THREE.SphereGeometry(shape.radius, 18, 12);
+    case T.PLANE: return new THREE.PlaneGeometry(30, 30);
+    case T.CYLINDER:
+    case T.CONVEXPOLYHEDRON: return convexGeometry(shape);
+    default: return new THREE.BoxGeometry(0.05, 0.05, 0.05);
+  }
+}
+
+const palette = [0xe8a33c, 0xd9b26f, 0xc98b5a, 0xe6c79a, 0xb8925f, 0xf0c070];
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x2b2238 });
+
+class BodyView {
+  constructor() { this.map = new Map(); this.group = new THREE.Group(); scene.add(this.group); }
+
+  style(body) {
+    const ud = body.userData ?? {};
+    if (body.type === CANNON.Body.STATIC) {
+      if (ud.role === 'occluder') return { color: 0xff9f43, opacity: 0.45, edges: true };
+      if (ud.staticId?.startsWith('boundary')) return { color: 0x8877aa, opacity: 0.06, edges: false };
+      if (ud.staticId === 'floor') return { color: 0x3a3048, opacity: 1, edges: true };
+      if (ud.staticId?.startsWith('wall')) return { color: 0x51456a, opacity: 0.35, edges: true };
+      return { color: 0x7a6a92, opacity: 0.9, edges: true };
+    }
+    if (ud.kind === 'cat') return { color: 0x6fd3ff, opacity: 1, edges: false };
+    if (ud.debrisOf) return { color: 0xff7b54, opacity: 1, edges: true };
+    return { color: palette[body.id % palette.length], opacity: 1, edges: true };
+  }
+
+  make(body) {
+    const s = this.style(body);
+    const mat = new THREE.MeshStandardMaterial({
+      color: s.color, roughness: 0.7, metalness: 0.05, transparent: s.opacity < 1, opacity: s.opacity,
+      side: THREE.DoubleSide, depthWrite: s.opacity >= 0.5,
+    });
+    const g = new THREE.Group();
+    body.shapes.forEach((shape, i) => {
+      const geo = geometryFor(shape);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.copy(body.shapeOffsets[i]);
+      m.quaternion.copy(body.shapeOrientations[i]);
+      g.add(m);
+      if (s.edges && shape.type !== CANNON.Shape.types.PLANE) {
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 30), edgeMat);
+        m.add(e);
+      }
+    });
+    g.userData = { mat, base: new THREE.Color(s.color) };
+    g.position.copy(body.position);
+    g.quaternion.copy(body.quaternion);
+    this.group.add(g);
+    this.map.set(body, g);
+    return g;
+  }
+
+  sync(world) {
+    const alive = new Set(world.bodies);
+    for (const [b, g] of this.map) {
+      if (!alive.has(b)) { this.group.remove(g); this.map.delete(b); }
+    }
+    for (const b of world.bodies) {
+      const g = this.map.get(b) ?? this.make(b);
+      if (b.type === CANNON.Body.STATIC) continue;
+      g.position.copy(b.position);
+      g.quaternion.copy(b.quaternion);
+      const sleeping = b.sleepState === CANNON.Body.SLEEPING;
+      g.userData.mat.color.copy(g.userData.base).multiplyScalar(sleeping ? 0.45 : 1);
+    }
+  }
+
+  dispose() { scene.remove(this.group); this.map.clear(); }
+}
+
+// --------------------------------------------------------------- overlays
+class BoxLines {
+  constructor(color, max = 4000) {
+    this.max = max;
+    this.pos = new Float32Array(max * 24 * 3);
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    this.lines = new THREE.LineSegments(this.geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55 }));
+    this.lines.frustumCulled = false;
+    scene.add(this.lines);
+  }
+  set(boxes) {
+    const n = Math.min(boxes.length, this.max);
+    let o = 0;
+    for (let i = 0; i < n; i++) {
+      const [x0, y0, z0] = boxes[i].min, [x1, y1, z1] = boxes[i].max;
+      const c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+      for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) {
+        this.pos.set(c[a], o); this.pos.set(c[b], o + 3); o += 6;
+      }
+    }
+    this.geo.setDrawRange(0, n * 24);
+    this.geo.attributes.position.needsUpdate = true;
+  }
+  set visible(v) { this.lines.visible = v; }
+  dispose() { scene.remove(this.lines); }
+}
+
+class PointCloud {
+  constructor(color, size = 0.03, max = 4000) {
+    this.max = max;
+    this.pos = new Float32Array(max * 3);
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    this.points = new THREE.Points(this.geo, new THREE.PointsMaterial({ color, size, sizeAttenuation: true, depthTest: false }));
+    this.points.frustumCulled = false;
+    this.points.renderOrder = 10;
+    scene.add(this.points);
+  }
+  set(list) {
+    const n = Math.min(list.length, this.max);
+    for (let i = 0; i < n; i++) { this.pos[i * 3] = list[i].x; this.pos[i * 3 + 1] = list[i].y; this.pos[i * 3 + 2] = list[i].z; }
+    this.geo.setDrawRange(0, n);
+    this.geo.attributes.position.needsUpdate = true;
+  }
+  set visible(v) { this.points.visible = v; }
+  dispose() { scene.remove(this.points); }
+}
+
+function contactPoints(world) {
+  return world.contacts.map((c) => c.bi.position.vadd(c.ri));
+}
+
+const markers = [];
+function marker(p, color, ttl = 1.2, radius = 0.03) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 12, 8), new THREE.MeshBasicMaterial({ color, transparent: true, depthTest: false }));
+  m.position.set(p.x, p.y, p.z);
+  m.renderOrder = 11;
+  scene.add(m);
+  markers.push({ m, ttl, life: ttl });
+}
+function updateMarkers(dt) {
+  for (let i = markers.length - 1; i >= 0; i--) {
+    const k = markers[i];
+    k.life -= dt;
+    k.m.material.opacity = Math.max(0, k.life / k.ttl);
+    if (k.life <= 0) { scene.remove(k.m); markers.splice(i, 1); }
+  }
+}
+function clearMarkers() { for (const k of markers) scene.remove(k.m); markers.length = 0; }
+
+let bannerTimer = 0;
+function banner(text, color) {
+  const b = $('banner');
+  b.textContent = text;
+  b.style.color = color;
+  b.style.display = 'block';
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => (b.style.display = 'none'), 2500);
+}
+
+// ------------------------------------------------------------- ui helpers
+function stats(rows) {
+  $('stats').innerHTML = rows.map(([k, v, cls = '']) => `<div class="k">${k}</div><div class="${cls}">${v}</div>`).join('');
+}
+function slider(id, label, min, max, step, value, fmt = (v) => v) {
+  return `<div class="row"><label for="${id}">${label}: <b id="${id}-v">${fmt(value)}</b></label>
+    <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></div>`;
+}
+function bindSlider(id, fmt, onChange) {
+  const el = $(id);
+  el.addEventListener('input', () => { $(`${id}-v`).textContent = fmt(+el.value); onChange(+el.value); });
+}
+function check(id, label, checked) {
+  return `<div class="row"><label for="${id}">${label}</label><input id="${id}" type="checkbox" ${checked ? 'checked' : ''}></div>`;
+}
+
+const keys = new Set();
+addEventListener('keydown', (e) => {
+  keys.add(e.code);
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => keys.delete(e.code));
+
+// ===================================================== mode: tunneling
+function tunnelMode() {
+  const opts = { speed: 12, guard: true, simSpeed: 2 };
+  let scn, view, trail, trailPts, mug, last, finished;
+
+  function restart() {
+    view?.dispose(); trail?.dispose(); clearMarkers();
+    scn = createTunnelingScenario({ speed: opts.speed, swats: 100, guard: opts.guard });
+    scn.setup();
+    view = new BodyView();
+    trail = new PointCloud(0xffffff, 0.022, 200);
+    trailPts = [];
+    mug = null;
+    last = { passThroughs: 0, guardClamps: 0 };
+    finished = false;
+    // Record the mug's centre after every substep: shows the 10 cm jumps.
+    scn.world.addEventListener('postStep', () => {
+      const m = scn.world.bodies.find((b) => b.type === CANNON.Body.DYNAMIC);
+      if (m !== mug) { mug = m; trailPts = []; }
+      if (m) { trailPts.push(m.position.clone()); if (trailPts.length > 60) trailPts.shift(); }
+    });
+  }
+
+  return {
+    title: 'Tunneling proof',
+    setup() {
+      frameCamera([2.2, 2.1, 2.4], [0, 1.35, 0]);
+      $('controls').innerHTML =
+        slider('speed', 'Swat speed (m/s)', 4, 60, 1, opts.speed) +
+        check('guard', 'Swept guard on', opts.guard) +
+        slider('sim', 'Sim speed (substeps / frame)', 1, 24, 1, opts.simSpeed) +
+        `<div class="btns"><button id="restart">Restart 100 swats</button></div>`;
+      bindSlider('speed', (v) => v, (v) => { opts.speed = v; restart(); });
+      bindSlider('sim', (v) => v, (v) => { opts.simSpeed = v; });
+      $('guard').addEventListener('change', (e) => { opts.guard = e.target.checked; restart(); });
+      $('restart').onclick = restart;
+      $('help').innerHTML = `A mug is swatted <b>down into a 2 cm shelf</b> 100 times (seeded, same as the Vitest proof).
+        White dots are the mug's centre after each 1/120 s substep. At 12 m/s they're 10 cm apart, five times the shelf.
+        <b>Guard off:</b> some mugs skip straight through (red flash).
+        <b>Guard on:</b> green dots mark where the guard caught the mug. Pass-throughs must stay 0.
+        Swats above 12 m/s set the velocity directly (the speed ramp).`;
+      restart();
+    },
+    frame() {
+      if (!finished) {
+        for (let i = 0; i < opts.simSpeed; i++) {
+          if (!scn.step()) { finished = true; break; }
+        }
+      }
+      const m = scn.metrics();
+      if (m.passThroughs > last.passThroughs) {
+        banner('PASS-THROUGH!', '#e05a3a');
+        if (mug) marker(mug.position, 0xff4d6d, 2, 0.05);
+      }
+      if (m.guardClamps > last.guardClamps) {
+        const c = scn.guard.stats.lastClamp;
+        if (c) marker(c.point, 0x47d18c, 1.5, 0.035);
+      }
+      if (finished && !last.finished) {
+        const ok = scn.pass(m);
+        banner(ok ? `PASS: 0 / ${m.swats} through` : `FAIL: ${m.passThroughs} / ${m.swats} through`, ok ? '#6ac47a' : '#e05a3a');
+      }
+      last = { ...m, finished };
+      view.sync(scn.world);
+      trail.set(trailPts);
+      stats([
+        ['Swats', `${m.swats} / 100`],
+        ['Speed', `${m.speed} m/s · ${(m.speed * DT * 100).toFixed(1)} cm per substep`],
+        ['Shelf thickness', `${(SHELF.half[1] * 200).toFixed(0)} cm`],
+        ['Pass-throughs', m.passThroughs, m.passThroughs === 0 ? 'pass' : 'fail'],
+        ['Guard', m.guard ? 'on' : 'off', m.guard ? 'pass' : 'warn'],
+        ['Guard checks', m.guardChecked],
+        ['Guard clamps', m.guardClamps],
+        ['Result', finished ? (scn.pass(m) ? 'PASS' : 'FAIL') : 'running…', finished ? (scn.pass(m) ? 'pass' : 'fail') : ''],
+      ]);
+    },
+    dispose() { view?.dispose(); trail?.dispose(); clearMarkers(); },
+  };
+}
+
+// ================================================= mode: sight & hiding
+function roomWorld() {
+  const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+  world.broadphase = new UniformGridBroadphase();
+  world.allowSleep = true;
+  const geo = buildStaticGeometry(world);
+  const guard = createSweptGuard(world);
+  return { world, geo, guard };
+}
+
+function hidingVolumeMeshes() {
+  const g = new THREE.Group();
+  for (const v of HIDING_VOLUMES) {
+    const size = [0, 1, 2].map((i) => v.max[i] - v.min[i]);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(...size),
+      new THREE.MeshBasicMaterial({ color: 0x4f86d9, transparent: true, opacity: 0.18, depthWrite: false }));
+    m.position.set(...[0, 1, 2].map((i) => (v.max[i] + v.min[i]) / 2));
+    g.add(m);
+  }
+  scene.add(g);
+  return g;
+}
+
+function sightMode() {
+  const EYES = {
+    'Standing by the bed': { x: -1.0, y: 1.6, z: 0.4 },
+    'Standing across the room': { x: 2.6, y: 1.6, z: 2.4 },
+    'Crouched at desk check point': { x: HIDING_VOLUMES[1].checkFrom[0], y: 0.2, z: HIDING_VOLUMES[1].checkFrom[2] },
+    'Crouched at bed check point': { x: HIDING_VOLUMES[0].checkFrom[0], y: 0.15, z: HIDING_VOLUMES[0].checkFrom[2] },
+  };
+  let world, view, raycast, cat, eye, eyeMesh, sightLine, groundLine, volumes, lastSpot = null;
+
+  function lineObj(color) {
+    const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const l = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, depthTest: false }));
+    l.renderOrder = 12;
+    l.frustumCulled = false;
+    scene.add(l);
+    return l;
+  }
+  function setLine(l, a, b, color) {
+    const p = l.geometry.attributes.position;
+    p.setXYZ(0, a.x, a.y, a.z); p.setXYZ(1, b.x, b.y, b.z); p.needsUpdate = true;
+    if (color !== undefined) l.material.color.setHex(color);
+  }
+
+  return {
+    title: 'Sight & hiding',
+    setup() {
+      ({ world } = roomWorld());
+      raycast = createRaycaster(world);
+      cat = new CANNON.Body({ mass: 4, shape: new CANNON.Sphere(0.1), position: new CANNON.Vec3(0.3, 0.1, 0.6), fixedRotation: true, collisionFilterGroup: CAT, linearDamping: 0.1 });
+      cat.userData = { kind: 'cat' };
+      world.addBody(cat);
+      view = new BodyView();
+      volumes = hidingVolumeMeshes();
+      eye = { ...EYES['Standing by the bed'] };
+      eyeMesh = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 10), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      scene.add(eyeMesh);
+      sightLine = lineObj(0x47d18c);
+      groundLine = lineObj(0x6fd3ff);
+      frameCamera([4.5, 4.8, 5.5], [-0.6, 0.4, -1.0]);
+
+      $('controls').innerHTML =
+        `<div class="row"><label for="eye">Owner eye</label><select id="eye">${Object.keys(EYES).map((k) => `<option>${k}</option>`).join('')}</select></div>` +
+        slider('eyeH', 'Eye height (m)', 0.1, 1.8, 0.05, eye.y, (v) => v.toFixed(2)) +
+        `<div class="btns"><button id="toBed">Put cat under bed</button><button id="toDesk">Put cat under desk</button><button id="toOpen">Open floor</button></div>`;
+      $('eye').addEventListener('change', (e) => {
+        eye = { ...EYES[e.target.value] };
+        $('eyeH').value = eye.y; $('eyeH-v').textContent = eye.y.toFixed(2);
+      });
+      bindSlider('eyeH', (v) => v.toFixed(2), (v) => { eye.y = v; });
+      const place = (x, z) => { cat.position.set(x, 0.1, z); cat.velocity.set(0, 0, 0); cat.wakeUp(); };
+      $('toBed').onclick = () => place(-2.4, -0.1);
+      $('toDesk').onclick = () => place(0.3, -2.75);
+      $('toOpen').onclick = () => place(0.3, 0.6);
+      $('help').innerHTML = `Drive the <b>blue cat</b> with <b>WASD / arrows</b>, <b>Space</b> to jump.
+        Walk it under the bed: it passes <b>through the orange bed skirt</b> (an occluder: no collision response) but the skirt still blocks sight.
+        The line from the owner's eye (white ball) to the cat is <b>green when visible, red when blocked</b>, and stops at the blocker.
+        Under the desk, a standing owner can't see the cat; switch to the crouched check point and the ray gets through the 26 cm gap.
+        The short line under the cat is the <b>ground ray</b> used for the jump check.`;
+    },
+    frame() {
+      // Cat controls: world axes, matching the default camera.
+      const s = 2.2;
+      let vx = 0, vz = 0;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) vz -= s;
+      if (keys.has('KeyS') || keys.has('ArrowDown')) vz += s;
+      if (keys.has('KeyA') || keys.has('ArrowLeft')) vx -= s;
+      if (keys.has('KeyD') || keys.has('ArrowRight')) vx += s;
+      if (vx || vz) { cat.wakeUp(); cat.velocity.x = vx; cat.velocity.z = vz; }
+      else { cat.velocity.x *= 0.8; cat.velocity.z *= 0.8; }
+      const ground = raycast(cat.position, { x: 0, y: -1, z: 0 }, 0.13, STATIC | PROP, { skip: cat });
+      if (keys.has('Space') && ground.hit) { cat.wakeUp(); cat.velocity.y = 3.6; keys.delete('Space'); }
+
+      world.step(DT); world.step(DT);
+      view.sync(world);
+
+      const los = lineOfSight(raycast, eye, cat.position, STATIC, { skip: cat });
+      eyeMesh.position.set(eye.x, eye.y, eye.z);
+      const d = { x: cat.position.x - eye.x, y: cat.position.y - eye.y, z: cat.position.z - eye.z };
+      const len = Math.hypot(d.x, d.y, d.z);
+      const end = los.visible ? cat.position : { x: eye.x + (d.x / len) * los.distance, y: eye.y + (d.y / len) * los.distance, z: eye.z + (d.z / len) * los.distance };
+      setLine(sightLine, eye, end, los.visible ? 0x47d18c : 0xff4d6d);
+      setLine(groundLine, cat.position, ground.hit ? ground.point : { x: cat.position.x, y: cat.position.y - 0.13, z: cat.position.z });
+
+      const spot = hidingSpotAt(cat.position);
+      if (spot?.id !== lastSpot) { if (spot) banner(`Hidden: ${spot.id}`, '#7fa8e0'); lastSpot = spot?.id ?? null; }
+      stats([
+        ['Owner sees cat?', los.visible ? 'YES' : 'no', los.visible ? 'fail' : 'pass'],
+        ['Blocked by', los.blocker?.userData?.staticId ?? '—'],
+        ['Blocker type', los.blocker?.userData?.role ?? '—'],
+        ['Hiding volume', spot?.id ?? '—', spot ? 'pass' : ''],
+        ['Grounded (ray)', ground.hit ? `yes, ${ground.distance.toFixed(3)} m` : 'no'],
+        ['Cat position', `${cat.position.x.toFixed(2)}, ${cat.position.y.toFixed(2)}, ${cat.position.z.toFixed(2)}`],
+      ]);
+    },
+    dispose() {
+      view?.dispose();
+      for (const o of [eyeMesh, sightLine, groundLine, volumes]) if (o) scene.remove(o);
+    },
+  };
+}
+
+// ======================================================= mode: fracture
+function fractureMode() {
+  const opts = { mug: 0.9, plate: 0.7 };
+  let world, view, fracture, maxImpulse, lastImpulse, contactsCloud;
+
+  const plate = (x, y, z) => {
+    const b = new CANNON.Body({ mass: 0.25, shape: new CANNON.Cylinder(0.18, 0.18, 0.025, 16), position: new CANNON.Vec3(x, y, z), collisionFilterGroup: PROP });
+    b.quaternion.setFromEuler((Math.random() - 0.5) * 0.6, 0, (Math.random() - 0.5) * 0.6);
+    world.addBody(b);
+    fracture.register(b, { kind: 'plate', breakImpulse: opts.plate });
+    return b;
+  };
+  const mug = (x, y, z) => {
+    const b = new CANNON.Body({ mass: 0.3, shape: new CANNON.Cylinder(0.08, 0.07, 0.14, 12), position: new CANNON.Vec3(x, y, z), collisionFilterGroup: PROP });
+    b.quaternion.setFromEuler((Math.random() - 0.5) * 1.2, Math.random() * 6, (Math.random() - 0.5) * 1.2);
+    world.addBody(b);
+    fracture.register(b, { kind: 'mug', breakImpulse: opts.mug });
+    return b;
+  };
+
+  function restart() {
+    view?.dispose(); contactsCloud?.dispose();
+    ({ world } = roomWorld());
+    view = new BodyView();
+    contactsCloud = new PointCloud(0xff4d6d, 0.035);
+    fracture = createFracture(world, { onBroken: (info) => banner(`${info.kind} broke into ${info.pieces.length}`, '#ff7b54') });
+    maxImpulse = 0; lastImpulse = 0;
+    // A minimal stand-in for D's impact harvester: solver impulse per pair
+    // after each step (multiplier x dt), fed to fracture as ImpactEvents.
+    world.addEventListener('postStep', () => {
+      const perPair = new Map();
+      for (const c of world.contacts) {
+        const key = c.bi.id < c.bj.id ? `${c.bi.id}-${c.bj.id}` : `${c.bj.id}-${c.bi.id}`;
+        const e = perPair.get(key) ?? { bodyA: c.bi, bodyB: c.bj, impulse: 0 };
+        e.impulse += Math.abs(c.multiplier) * DT;
+        perPair.set(key, e);
+      }
+      for (const e of perPair.values()) {
+        if (fracture.isBreakable(e.bodyA) || fracture.isBreakable(e.bodyB)) {
+          lastImpulse = Math.max(lastImpulse * 0.98, e.impulse);
+          maxImpulse = Math.max(maxImpulse, e.impulse);
+          fracture.onImpact(e);
+        }
+      }
+    });
+    // A few things already sitting on the desk.
+    plate(0.2, 0.97, -2.6); plate(0.2, 1.0, -2.6); plate(0.2, 1.03, -2.6);
+    mug(0.9, 1.02, -2.55);
+  }
+
+  return {
+    title: 'Fracture',
+    setup() {
+      frameCamera([2.8, 2.6, 2.4], [0.2, 0.7, -1.6]);
+      $('controls').innerHTML =
+        `<div class="btns">
+           <button id="dropPlate">Drop plate on floor</button><button id="dropMug">Drop mug on floor</button>
+           <button id="throwMug">Throw mug at wall</button><button id="dropStack">Drop 5 plates on desk</button>
+           <button id="reset">Reset room</button>
+         </div>` +
+        slider('bMug', 'Mug break impulse (N·s)', 0.1, 3, 0.05, opts.mug, (v) => v.toFixed(2)) +
+        slider('bPlate', 'Plate break impulse (N·s)', 0.1, 3, 0.05, opts.plate, (v) => v.toFixed(2));
+      const rx = () => (Math.random() - 0.5) * 1.2;
+      $('dropPlate').onclick = () => plate(0.3 + rx(), 1.6, 0.3 + rx() * 0.5);
+      $('dropMug').onclick = () => mug(0.3 + rx(), 1.6, 0.3 + rx() * 0.5);
+      $('throwMug').onclick = () => { const m = mug(0.3, 1.2, 0.5); m.velocity.set(rx(), 1.5, -9); m.angularVelocity.set(4, 2, 1); };
+      $('dropStack').onclick = () => { for (let i = 0; i < 5; i++) plate(0.6, 1.4 + i * 0.12, -2.6); };
+      $('reset').onclick = restart;
+      bindSlider('bMug', (v) => v.toFixed(2), (v) => { opts.mug = v; });
+      bindSlider('bPlate', (v) => v.toFixed(2), (v) => { opts.plate = v; });
+      $('help').innerHTML = `Plates and mugs are registered with <b>fracture</b>. A small stand-in harvester reads each contact's
+        solver impulse (multiplier × dt) after every step. When it passes the break impulse the body is swapped for
+        <b>pre-cut pieces</b> (plate → 3 wedges, mug → 2 shells + base) that keep its velocity and spin.
+        Swapping happens with <b>flush() after world.step()</b>, never inside a step.
+        Raise the break impulse and the same drop just clatters instead.`;
+      restart();
+    },
+    frame() {
+      world.step(DT); fracture.flush();
+      world.step(DT); fracture.flush();
+      view.sync(world);
+      contactsCloud.set(contactPoints(world));
+      const debris = world.bodies.filter((b) => b.userData?.debrisOf).length;
+      stats([
+        ['Broken', fracture.stats.broken],
+        ['Pieces spawned', fracture.stats.pieces],
+        ['Debris bodies', debris],
+        ['Recent impulse', `${lastImpulse.toFixed(2)} N·s`],
+        ['Max impulse seen', `${maxImpulse.toFixed(2)} N·s`],
+        ['Bodies', world.bodies.length],
+      ]);
+    },
+    dispose() { view?.dispose(); contactsCloud?.dispose(); },
+  };
+}
+
+// ==================================================== mode: broadphase
+function perfMode() {
+  const opts = { bodies: 400, broadphase: 'grid', cellSize: 0.5, cells: true, contacts: false };
+  let scn, world, view, cellLines, contactsCloud, bpMs = 0, bpPairs = 0, stepMs = 0;
+
+  function restart() {
+    view?.dispose(); cellLines?.dispose(); contactsCloud?.dispose();
+    scn = createBroadphasePerfScenario({ bodies: opts.bodies, broadphase: opts.broadphase, cellSize: opts.cellSize });
+    world = scn.setup();
+    // Time and count whatever broadphase is plugged in.
+    const bp = world.broadphase;
+    const inner = bp.collisionPairs;
+    bp.collisionPairs = (w, p1, p2) => {
+      const t = performance.now();
+      inner.call(bp, w, p1, p2);
+      bpMs = bpMs * 0.9 + (performance.now() - t) * 0.1;
+      bpPairs = p1.length;
+    };
+    view = new BodyView();
+    cellLines = new BoxLines(0x47d18c);
+    contactsCloud = new PointCloud(0xff4d6d, 0.03);
+  }
+
+  return {
+    title: 'Broadphase 400',
+    setup() {
+      frameCamera([6.5, 6.5, 7.5], [0, 0.4, 0]);
+      $('controls').innerHTML =
+        `<div class="row"><label for="n">Bodies</label><select id="n"><option>60</option><option>200</option><option selected>400</option></select></div>` +
+        `<div class="row"><label for="bp">Broadphase</label><select id="bp"><option value="grid">Uniform grid (ours)</option><option value="naive">cannon Naive</option><option value="sap">cannon SAP</option></select></div>` +
+        slider('cell', 'Grid cell size (m)', 0.15, 1.5, 0.05, opts.cellSize, (v) => v.toFixed(2)) +
+        check('showCells', 'Show occupied grid cells', opts.cells) +
+        check('showContacts', 'Show contact points', opts.contacts) +
+        `<div class="btns"><button id="restart">Restart drop</button><button id="shake">Shake the room</button></div>`;
+      $('n').addEventListener('change', (e) => { opts.bodies = +e.target.value; restart(); });
+      $('bp').addEventListener('change', (e) => { opts.broadphase = e.target.value; restart(); });
+      bindSlider('cell', (v) => v.toFixed(2), (v) => {
+        opts.cellSize = v;
+        if (world.broadphase instanceof UniformGridBroadphase) world.broadphase.setCellSize(v);
+      });
+      $('showCells').addEventListener('change', (e) => { opts.cells = e.target.checked; });
+      $('showContacts').addEventListener('change', (e) => { opts.contacts = e.target.checked; });
+      $('restart').onclick = restart;
+      $('shake').onclick = () => {
+        for (const b of world.bodies) if (b.type === CANNON.Body.DYNAMIC) { b.wakeUp(); b.velocity.set((Math.random() - 0.5) * 3, 2 + Math.random() * 3, (Math.random() - 0.5) * 3); }
+      };
+      $('help').innerHTML = `Props rain into the room. With the <b>uniform grid</b>, green boxes are the cells occupied by
+        moving bodies this step; only bodies sharing a cell are pair-tested. Compare <b>broadphase pairs</b> (handed to the
+        narrowphase) with cannon's Naive and SAP: the grid's AABB test hands over far fewer false pairs.
+        Drag the cell size and watch candidate pairs vs cells trade off. Dim bodies are asleep and skipped.`;
+      restart();
+    },
+    frame() {
+      const t = performance.now();
+      world.step(DT); world.step(DT);
+      stepMs = stepMs * 0.9 + ((performance.now() - t) / 2) * 0.1;
+      view.sync(world);
+      const grid = world.broadphase instanceof UniformGridBroadphase ? world.broadphase : null;
+      cellLines.visible = !!(grid && opts.cells);
+      if (grid && opts.cells) cellLines.set(grid.occupiedCellBounds('dynamic'));
+      contactsCloud.visible = opts.contacts;
+      if (opts.contacts) contactsCloud.set(contactPoints(world));
+      const dyn = world.bodies.filter((b) => b.type === CANNON.Body.DYNAMIC);
+      const awake = dyn.filter((b) => b.sleepState !== CANNON.Body.SLEEPING).length;
+      stats([
+        ['Broadphase', opts.broadphase === 'grid' ? `grid @ ${world.broadphase.cellSize.toFixed(2)} m` : opts.broadphase],
+        ['Physics step', `${stepMs.toFixed(2)} ms`, stepMs < 4 ? 'pass' : stepMs < 8 ? 'warn' : 'fail'],
+        ['Broadphase time', `${bpMs.toFixed(3)} ms`],
+        ['Occupied cells', grid ? grid.stats.occupiedCells : '—'],
+        ['Candidate pairs', grid ? grid.stats.candidatePairs : bpPairs],
+        ['Broadphase pairs', bpPairs],
+        ['Narrow-phase pairs', narrowPairCount(world)],
+        ['Awake bodies', `${awake} / ${dyn.length}`],
+      ]);
+    },
+    dispose() { view?.dispose(); cellLines?.dispose(); contactsCloud?.dispose(); },
+  };
+}
+
+// ============================================================ main loop
+const MODES = { tunnel: tunnelMode, sight: sightMode, fracture: fractureMode, perf: perfMode };
+let mode = null;
+
+function setMode(name) {
+  mode?.dispose();
+  clearMarkers();
+  mode = MODES[name]();
+  for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('on', b.dataset.mode === name);
+  mode.setup();
+  try { localStorage.setItem('collisionDemoMode', name); } catch {}
+}
+for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => setMode(b.dataset.mode);
+
+let saved = null;
+try { saved = localStorage.getItem('collisionDemoMode'); } catch {}
+setMode(MODES[saved] ? saved : 'tunnel');
+
+let lastT = performance.now(), fpsFrames = 0, fpsT = 0;
+function tick() {
+  requestAnimationFrame(tick);
+  const now = performance.now();
+  const dt = Math.min((now - lastT) / 1000, 0.1);
+  lastT = now;
+  fpsFrames++; fpsT += dt;
+  if (fpsT > 0.5) { document.title = `Collision Layer Demo · ${Math.round(fpsFrames / fpsT)} fps`; fpsFrames = 0; fpsT = 0; }
+  mode.frame(dt);
+  updateMarkers(dt);
+  controls.update();
+  renderer.render(scene, camera);
+}
+tick();
+</script>
+</body>
+</html>
