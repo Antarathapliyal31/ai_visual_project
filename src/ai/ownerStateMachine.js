@@ -35,6 +35,9 @@ export function createOwnerAI(options = {}) {
     ...(options.thresholds ?? {}),
   };
 
+  const areaKeys = ['northWest', 'northEast', 'southWest', 'southEast', 'west', 'east', 'center'];
+  const areaMemoryInitial = Object.fromEntries(areaKeys.map((key) => [key, 0]));
+
   const state = {
     currentState: 'asleep',
     wakeLevel: 0,
@@ -44,7 +47,10 @@ export function createOwnerAI(options = {}) {
     lastSeenCat: null,
     suspicion: 0,
     suspicionMeter: 0,
+    suspicionPhase: 'calm',
+    searchPattern: 'sweep',
     searchRoute: [],
+    areaMemory: { ...areaMemoryInitial },
     noise: null,
     bedPosition: options.bedPosition ?? [0, 0, 0],
     homePosition: options.homePosition ?? options.bedPosition ?? [0, 0, 0],
@@ -74,6 +80,35 @@ export function createOwnerAI(options = {}) {
     return state.searchRoute;
   }
 
+  function updateSuspicionPhase() {
+    if (state.suspicionMeter <= 0.15) {
+      state.suspicionPhase = 'calm';
+    } else if (state.suspicionMeter < 0.5) {
+      state.suspicionPhase = 'alert';
+    } else if (state.suspicionMeter < 0.8) {
+      state.suspicionPhase = 'searching';
+    } else {
+      state.suspicionPhase = 'hunting';
+    }
+
+    if (state.lastSeenCat) {
+      state.searchPattern = 'focusedSweep';
+    } else if (state.suspicionMeter >= 0.8) {
+      state.searchPattern = 'fanOut';
+    } else if (state.suspicionMeter >= 0.5) {
+      state.searchPattern = 'perimeterSweep';
+    } else {
+      state.searchPattern = 'sweep';
+    }
+  }
+
+  function registerAreaMemory(pos) {
+    if (!Array.isArray(pos) || pos.length < 3) return;
+    const area = roomAreaFor(pos);
+    if (area === 'center') state.areaMemory.center += 0.25;
+    else if (area in state.areaMemory) state.areaMemory[area] += 0.5;
+  }
+
   const api = {
     update(dt, wakeLevel) {
       const incomingWake = typeof wakeLevel === 'number' ? clamp01(wakeLevel) : state.wakeLevel;
@@ -94,6 +129,7 @@ export function createOwnerAI(options = {}) {
       if (state.lastSeenCat && state.suspicionMeter <= 0.08) {
         state.lastSeenCat = null;
       }
+      updateSuspicionPhase();
       updateCurrentState();
 
       const decision = evaluateBehaviorTree(
@@ -181,6 +217,18 @@ export function createOwnerAI(options = {}) {
       return [...state.searchRoute];
     },
 
+    getSuspicionPhase() {
+      return state.suspicionPhase;
+    },
+
+    getSearchPattern() {
+      return state.searchPattern;
+    },
+
+    getAreaMemory() {
+      return { ...state.areaMemory };
+    },
+
     getLastSeenCat() {
       return state.lastSeenCat ? [...state.lastSeenCat] : null;
     },
@@ -192,6 +240,8 @@ export function createOwnerAI(options = {}) {
       state.target = [...pos];
       state.suspicionMeter = clamp01(Math.max(state.suspicionMeter, 0.55));
       state.suspicion = state.suspicionMeter;
+      registerAreaMemory(pos);
+      updateSuspicionPhase();
       updateSearchRoute(pos);
       return [...state.lastSeenCat];
     },
@@ -210,10 +260,12 @@ export function createOwnerAI(options = {}) {
       if (Array.isArray(nextNoise.position)) {
         state.lastKnownTarget = [...nextNoise.position];
         state.target = [...nextNoise.position];
+        registerAreaMemory(nextNoise.position);
         updateSearchRoute(nextNoise.position);
       }
       state.suspicionMeter = clamp01(Math.max(state.suspicionMeter, nextNoise.loudness * 0.8 + 0.2));
       state.suspicion = state.suspicionMeter;
+      updateSuspicionPhase();
 
       return nextNoise;
     },
@@ -230,6 +282,7 @@ export function createOwnerAI(options = {}) {
         state.target = null;
       }
 
+      updateSuspicionPhase();
       updateCurrentState();
       return true;
     },

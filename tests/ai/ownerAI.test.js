@@ -122,6 +122,18 @@ describe('owner AI state machine', () => {
     expect(ai.getTarget()).toEqual([1.5, 0, 0.5]);
   });
 
+  it('tracks suspicion phases, area memory, and the chosen search pattern', () => {
+    const ai = createOwnerAI({ thresholds: { stirring: 0.2, sittingUp: 0.45, standing: 0.7, awake: 0.85 } });
+
+    ai.onNoise({ loudness: 0.9, position: [-2.5, 0, -2.0] });
+    ai.update(0.1, 0.8);
+    ai.trackLastSeenCat([1.5, 0, -1.5]);
+
+    expect(['calm', 'alert', 'searching', 'hunting']).toContain(ai.getSuspicionPhase());
+    expect(ai.getAreaMemory().northWest).toBeGreaterThan(0);
+    expect(['sweep', 'fanOut', 'perimeterSweep', 'focusedSweep']).toContain(ai.getSearchPattern());
+  });
+
   it('starts lying in bed as a visual placeholder', () => {
     const owner = createOwnerPlaceholder({ bedPosition: [0, 0.5, 0] });
 
