@@ -14,74 +14,165 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
 
+function clonePosition(pos) {
+  if (!Array.isArray(pos)) return null;
+  return [...pos];
+}
+
+function roomAreaFor(pos) {
+  if (!Array.isArray(pos) || pos.length < 3) return 'center';
+  const [x, , z] = pos;
+  if (z < -1.25) return x < -1 ? 'northWest' : 'northEast';
+  if (z > 1.25) return x < 0 ? 'southWest' : 'southEast';
+  if (x < -1.25) return 'west';
+  if (x > 1.25) return 'east';
+  return 'center';
+}
+
 export function createOwnerAI(options = {}) {
   const thresholds = {
     ...DEFAULT_THRESHOLDS,
     ...(options.thresholds ?? {}),
   };
 
+  const areaKeys = ['northWest', 'northEast', 'southWest', 'southEast', 'west', 'east', 'center'];
+  const areaMemoryInitial = Object.fromEntries(areaKeys.map((key) => [key, 0]));
+
   const state = {
     currentState: 'asleep',
     wakeLevel: 0,
     action: 'idle',
     target: null,
+    lastKnownTarget: null,
+    lastSeenCat: null,
+    suspicion: 0,
+    suspicionMeter: 0,
+    suspicionPhase: 'calm',
+    searchPattern: 'sweep',
+    searchRoute: [],
+    areaMemory: { ...areaMemoryInitial },
     noise: null,
     bedPosition: options.bedPosition ?? [0, 0, 0],
     homePosition: options.homePosition ?? options.bedPosition ?? [0, 0, 0],
     position: options.position ?? options.bedPosition ?? [0, 0, 0],
   };
 
+  function updateCurrentState() {
+    if (state.wakeLevel <= thresholds.stirring) {
+      state.currentState = 'asleep';
+    } else if (state.wakeLevel < thresholds.sittingUp) {
+      state.currentState = 'stirring';
+    } else if (state.wakeLevel < thresholds.standing) {
+      state.currentState = 'sittingUp';
+    } else if (state.wakeLevel < thresholds.awake) {
+      state.currentState = 'standing';
+    } else {
+      state.currentState = 'awake';
+    }
+  }
+
+  function updateSearchRoute(pos) {
+    if (!Array.isArray(pos) || pos.length < 3) {
+      state.searchRoute = ['center'];
+      return state.searchRoute;
+    }
+    state.searchRoute = [roomAreaFor(pos), 'focused'];
+    return state.searchRoute;
+  }
+
+  function updateSuspicionPhase() {
+    if (state.suspicionMeter <= 0.15) {
+      state.suspicionPhase = 'calm';
+    } else if (state.suspicionMeter < 0.5) {
+      state.suspicionPhase = 'alert';
+    } else if (state.suspicionMeter < 0.8) {
+      state.suspicionPhase = 'searching';
+    } else {
+      state.suspicionPhase = 'hunting';
+    }
+
+    if (state.lastSeenCat) {
+      state.searchPattern = 'focusedSweep';
+    } else if (state.suspicionMeter >= 0.8) {
+      state.searchPattern = 'fanOut';
+    } else if (state.suspicionMeter >= 0.5) {
+      state.searchPattern = 'perimeterSweep';
+    } else {
+      state.searchPattern = 'sweep';
+    }
+  }
+
+  function registerAreaMemory(pos) {
+    if (!Array.isArray(pos) || pos.length < 3) return;
+    const area = roomAreaFor(pos);
+    if (area === 'center') state.areaMemory.center += 0.25;
+    else if (area in state.areaMemory) state.areaMemory[area] += 0.5;
+  }
+
   const api = {
     update(dt, wakeLevel) {
       const incomingWake = typeof wakeLevel === 'number' ? clamp01(wakeLevel) : state.wakeLevel;
       state.wakeLevel = incomingWake;
 
-      const wakeFloor = thresholds.stirring * 0.75;
-
-      if (!state.noise && state.wakeLevel <= thresholds.stirring) {
-        state.currentState = 'asleep';
-      } else {
-        let advanced = true;
-        while (advanced) {
-          advanced = false;
-
-          if (state.currentState === 'asleep' && state.wakeLevel >= thresholds.stirring) {
-            state.currentState = 'stirring';
-            advanced = true;
-          } else if (state.currentState === 'stirring' && state.wakeLevel >= thresholds.sittingUp) {
-            state.currentState = 'sittingUp';
-            advanced = true;
-          } else if (state.currentState === 'sittingUp' && state.wakeLevel >= thresholds.standing) {
-            state.currentState = 'standing';
-            advanced = true;
-          } else if (state.currentState === 'standing' && state.wakeLevel >= thresholds.awake) {
-            state.currentState = 'awake';
-            advanced = true;
-          } else if (state.currentState === 'awake' && state.wakeLevel < wakeFloor) {
-            state.currentState = 'asleep';
-            advanced = true;
-          }
-        }
+      if (state.noise && Array.isArray(state.noise.position)) {
+        state.lastKnownTarget = [...state.noise.position];
+        state.target = [...state.noise.position];
+        state.suspicionMeter = clamp01(Math.max(state.suspicionMeter, state.noise.loudness * 0.75 + 0.25));
+      } else if (state.suspicionMeter > 0) {
+        state.suspicionMeter = clamp01(state.suspicionMeter - dt * 0.2);
       }
 
+      state.suspicion = state.suspicionMeter;
+      if (state.suspicionMeter <= 0.05) {
+        state.lastKnownTarget = null;
+      }
+      if (state.lastSeenCat && state.suspicionMeter <= 0.08) {
+        state.lastSeenCat = null;
+      }
+      updateSuspicionPhase();
+      updateCurrentState();
+
       const decision = evaluateBehaviorTree(
-        { currentState: state.currentState, wakeLevel: state.wakeLevel, target: state.target },
+        {
+          currentState: state.currentState,
+          wakeLevel: state.wakeLevel,
+          target: state.lastSeenCat ?? state.lastKnownTarget ?? state.target,
+          suspicion: state.suspicionMeter,
+          suspicionMeter: state.suspicionMeter,
+          lastKnownTarget: state.lastKnownTarget,
+          lastSeenCat: state.lastSeenCat,
+          searchRoute: state.searchRoute,
+        },
         state.noise,
+        { thresholds },
       );
 
       state.action = decision.action;
-      state.target = decision.target ?? state.target;
+      state.target = decision.target ?? state.lastSeenCat ?? state.lastKnownTarget ?? state.target;
+      if (state.target) updateSearchRoute(state.target);
 
-      if (!state.noise) {
+      if (!state.noise && state.target && state.suspicionMeter >= 0.15) {
+        state.lastKnownTarget = clonePosition(state.target);
+      } else if (!state.noise && state.suspicionMeter < 0.05) {
         state.target = null;
+        state.lastKnownTarget = null;
       }
 
       if (state.action === 'returnToBed') {
         state.position = [...state.homePosition];
+        state.target = null;
+        state.lastKnownTarget = null;
+        state.suspicionMeter = 0;
+        state.suspicion = 0;
       }
 
       if (state.currentState === 'asleep') {
         state.position = [...state.homePosition];
+        state.target = null;
+        state.lastKnownTarget = null;
+        state.lastSeenCat = null;
+        state.suspicionMeter = 0;
+        state.suspicion = 0;
       }
 
       return {
@@ -107,7 +198,7 @@ export function createOwnerAI(options = {}) {
     },
 
     getTarget() {
-      return state.target;
+      return state.target ? [...state.target] : null;
     },
 
     getPosition() {
@@ -116,6 +207,43 @@ export function createOwnerAI(options = {}) {
 
     getBedPosition() {
       return [...state.homePosition];
+    },
+
+    getSuspicionMeter() {
+      return state.suspicionMeter;
+    },
+
+    getSearchRoute() {
+      return [...state.searchRoute];
+    },
+
+    getSuspicionPhase() {
+      return state.suspicionPhase;
+    },
+
+    getSearchPattern() {
+      return state.searchPattern;
+    },
+
+    getAreaMemory() {
+      return { ...state.areaMemory };
+    },
+
+    getLastSeenCat() {
+      return state.lastSeenCat ? [...state.lastSeenCat] : null;
+    },
+
+    trackLastSeenCat(pos) {
+      if (!Array.isArray(pos)) return null;
+      state.lastSeenCat = [...pos];
+      state.lastKnownTarget = [...pos];
+      state.target = [...pos];
+      state.suspicionMeter = clamp01(Math.max(state.suspicionMeter, 0.55));
+      state.suspicion = state.suspicionMeter;
+      registerAreaMemory(pos);
+      updateSuspicionPhase();
+      updateSearchRoute(pos);
+      return [...state.lastSeenCat];
     },
 
     onNoise(noiseEvent) {
@@ -129,20 +257,33 @@ export function createOwnerAI(options = {}) {
       };
 
       state.noise = nextNoise;
-      state.target = Array.isArray(nextNoise.position) ? [...nextNoise.position] : null;
-      state.position = Array.isArray(nextNoise.position) ? [...nextNoise.position] : state.position;
+      if (Array.isArray(nextNoise.position)) {
+        state.lastKnownTarget = [...nextNoise.position];
+        state.target = [...nextNoise.position];
+        registerAreaMemory(nextNoise.position);
+        updateSearchRoute(nextNoise.position);
+      }
+      state.suspicionMeter = clamp01(Math.max(state.suspicionMeter, nextNoise.loudness * 0.8 + 0.2));
+      state.suspicion = state.suspicionMeter;
+      updateSuspicionPhase();
+
       return nextNoise;
     },
 
     clearNoise() {
       state.noise = null;
-      state.target = null;
       state.action = 'idle';
 
-      if (state.wakeLevel <= thresholds.stirring) {
-        state.currentState = 'asleep';
+      if (state.lastSeenCat && state.suspicionMeter > 0.1) {
+        state.target = [...state.lastSeenCat];
+      } else if (state.lastKnownTarget && state.suspicionMeter > 0.15) {
+        state.target = [...state.lastKnownTarget];
+      } else {
+        state.target = null;
       }
 
+      updateSuspicionPhase();
+      updateCurrentState();
       return true;
     },
 

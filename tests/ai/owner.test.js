@@ -111,6 +111,22 @@ describe('owner up and about', () => {
     }
   });
 
+  it('searches the sound first, then sweeps that part of the room before giving up', () => {
+    const s = setup(); // the cat stays hidden under the bed
+    s.noise.meter.raise(0.8);
+    s.sound([1.2, 1.8]); // south-east of the room, near nothing
+    const goals = [];
+    s.run(40, () => {
+      if (s.owner.state.motor === 'scanning' && s.owner.state.noise) {
+        const g = s.owner.state.noise;
+        if (!goals.some((p) => Math.hypot(p.x - g.x, p.z - g.z) < 0.05)) goals.push({ x: g.x, z: g.z });
+      }
+    });
+    expect(goals.length).toBeGreaterThanOrEqual(2);
+    expect(Math.hypot(goals[0].x - 1.2, goals[0].z - 1.8)).toBeLessThan(0.05); // the sound itself first
+    for (const g of goals.slice(1)) expect(Math.hypot(g.x - 1.2, g.z - 1.8)).toBeGreaterThan(0.8);
+  });
+
   it('pushes a prop out of his way instead of stopping', () => {
     const s = setup();
     const book = s.physics.spawn('book', { base: [-1.6, 0, -1.5] }); // on the line from the bedside to the noise

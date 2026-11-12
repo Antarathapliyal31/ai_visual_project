@@ -6,29 +6,150 @@ export const OWNER_ACTIONS = [
   'returnToBed',
 ];
 
-export function evaluateBehaviorTree(state, noise = null) {
-  const { currentState, wakeLevel, target } = state;
+const DEFAULT_THRESHOLDS = {
+  stirring: 0.2,
+  sittingUp: 0.45,
+  standing: 0.7,
+  awake: 0.85,
+  investigateLoudness: 0.5,
+};
 
-  if (currentState === 'asleep') {
-    return { action: 'idle', target: null };
-  }
+function clamp01(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
 
-  if (!noise) {
-    return {
-      action: currentState === 'standing' || currentState === 'awake' ? 'returnToBed' : 'idle',
-      target: null,
-    };
-  }
+function roomAreaFor(pos) {
+  if (!Array.isArray(pos) || pos.length < 3) return 'center';
+  const [x, , z] = pos;
+  if (z < -1.25) return x < -1 ? 'northWest' : 'northEast';
+  if (z > 1.25) return x < 0 ? 'southWest' : 'southEast';
+  if (x < -1.25) return 'west';
+  if (x > 1.25) return 'east';
+  return 'center';
+}
 
-  const nextTarget = noise.position ?? target ?? null;
+function hidingSpotWeight(area, hiddenTarget) {
+  const areaBias = {
+    northWest: 1.4,
+    northEast: 1.1,
+    southWest: 1.2,
+    southEast: 1.1,
+    west: 1.5,
+    east: 1.2,
+    center: 1.0,
+  };
+  const base = hiddenTarget ? 0.7 : 0.3;
+  return base + (areaBias[area] ?? 1.0);
+}
 
-  if (currentState === 'stirring' || currentState === 'sittingUp') {
-    return { action: 'investigate', target: nextTarget };
-  }
+export function createBehaviorTree(options = {}) {
+  const thresholds = {
+    ...DEFAULT_THRESHOLDS,
+    ...(options.thresholds ?? {}),
+  };
 
-  if (noise.loudness > 0.5 || wakeLevel >= 0.7) {
-    return { action: 'search', target: nextTarget };
-  }
+  const selector = (...nodes) => (blackboard) => {
+    for (const node of nodes) {
+      const result = node(blackboard);
+      if (result) return result;
+    }
+    return null;
+  };
 
-  return { action: 'checkHidingSpot', target: nextTarget };
+  const blackboardFor = (state, noise) => ({
+    currentState: state?.currentState ?? 'asleep',
+    wakeLevel: clamp01(state?.wakeLevel ?? 0),
+    target: state?.target ?? state?.lastKnownTarget ?? state?.lastSeenCat ?? noise?.position ?? null,
+    loudness: clamp01(noise?.loudness ?? 0),
+    suspicion: clamp01(state?.suspicion ?? 0),
+    suspicionMeter: clamp01(state?.suspicionMeter ?? state?.suspicion ?? 0),
+    suspicionPhase: state?.suspicionPhase ?? 'calm',
+    searchPattern: state?.searchPattern ?? 'sweep',
+    hasNoise: !!noise,
+    noisePosition: noise?.position ?? null,
+    lastKnownTarget: state?.lastKnownTarget ?? null,
+    lastSeenCat: state?.lastSeenCat ?? null,
+    searchRoute: Array.isArray(state?.searchRoute) ? state.searchRoute : [],
+    areaMemory: state?.areaMemory ?? { northWest: 0, northEast: 0, southWest: 0, southEast: 0, west: 0, east: 0, center: 0 },
+    roomArea: roomAreaFor(state?.lastKnownTarget ?? state?.lastSeenCat ?? state?.target ?? noise?.position ?? null),
+    thresholds,
+  });
+
+  const isAsleep = (bb) => (bb.currentState === 'asleep' ? { action: 'idle', target: null } : null);
+  const hasNoNoise = (bb) => {
+    if (!bb.hasNoise) {
+      const target = bb.lastSeenCat ?? bb.lastKnownTarget ?? bb.target ?? bb.noisePosition ?? null;
+      if (target && bb.suspicionMeter >= 0.18 && bb.wakeLevel >= bb.thresholds.stirring) {
+        return {
+          action: 'search',
+          target,
+          roomArea: roomAreaFor(target),
+          searchPattern: bb.lastSeenCat ? 'focusedSweep' : (bb.suspicionPhase === 'hunting' ? 'fanOut' : 'perimeterSweep'),
+          hidingSpotWeight: hidingSpotWeight(roomAreaFor(target), !!bb.lastSeenCat),
+        };
+      }
+      if (target && (bb.currentState === 'standing' || bb.currentState === 'awake') && bb.wakeLevel >= bb.thresholds.standing) {
+        return {
+          action: 'search',
+          target,
+          roomArea: roomAreaFor(target),
+          searchPattern: bb.lastSeenCat ? 'focusedSweep' : 'perimeterSweep',
+          hidingSpotWeight: hidingSpotWeight(roomAreaFor(target), !!bb.lastSeenCat),
+        };
+      }
+      return {
+        action: bb.currentState === 'standing' || bb.currentState === 'awake' ? 'returnToBed' : 'idle',
+        target: null,
+      };
+    }
+    return null;
+  };
+  const isInvestigating = (bb) => (
+    (bb.currentState === 'stirring' || bb.currentState === 'sittingUp') && (bb.target || bb.lastSeenCat)
+      ? {
+          action: 'investigate',
+          target: bb.lastSeenCat ?? bb.target,
+          roomArea: roomAreaFor(bb.lastSeenCat ?? bb.target),
+          searchPattern: 'sweep',
+          hidingSpotWeight: hidingSpotWeight(roomAreaFor(bb.lastSeenCat ?? bb.target), !!bb.lastSeenCat),
+        }
+      : null
+  );
+  const isSearching = (bb) => (
+    bb.hasNoise && (bb.loudness > bb.thresholds.investigateLoudness || bb.suspicionMeter > 0.35 || bb.wakeLevel >= bb.thresholds.standing)
+      ? {
+          action: 'search',
+          target: bb.lastSeenCat ?? bb.target,
+          roomArea: roomAreaFor(bb.lastSeenCat ?? bb.target),
+          searchPattern: bb.lastSeenCat ? 'focusedSweep' : (bb.suspicionPhase === 'hunting' ? 'fanOut' : 'perimeterSweep'),
+          hidingSpotWeight: hidingSpotWeight(roomAreaFor(bb.lastSeenCat ?? bb.target), !!bb.lastSeenCat),
+        }
+      : null
+  );
+  const isCheckingHidingSpot = (bb) => (
+    bb.hasNoise && bb.wakeLevel < bb.thresholds.standing && bb.target
+      ? {
+          action: 'checkHidingSpot',
+          target: bb.target,
+          roomArea: roomAreaFor(bb.target),
+          searchPattern: 'sweep',
+          hidingSpotWeight: hidingSpotWeight(roomAreaFor(bb.target), false),
+        }
+      : null
+  );
+
+  const tree = selector(
+    isAsleep,
+    hasNoNoise,
+    isInvestigating,
+    isSearching,
+    isCheckingHidingSpot,
+  );
+
+  return (state, noise = null) => tree(blackboardFor(state, noise)) ?? { action: 'idle', target: null };
+}
+
+export function evaluateBehaviorTree(state, noise = null, options = {}) {
+  return createBehaviorTree(options)(state, noise);
 }

@@ -12,7 +12,8 @@
 //  - Standing, he gets up on the north side of the bed and walks A* paths
 //    (navigation.js) as a kinematic body, so props and the cat are pushed
 //    aside but nothing static is walked through.
-//  - search: walk to the noise, look around, then check the hiding spot
+//  - search: walk to the noise, look around, then sweep that part of the room
+//    (Antara's search anchors, nearest first), then check the hiding spot
 //    nearest to it. checkHidingSpot: crouch at the spot's check point and look
 //    in with a low eye (A's hiding volumes); the bed skirt still hides a cat
 //    under the bed, the desk does not. returnToBed: walk back and wait by the
@@ -23,8 +24,9 @@
 //    caught. Out of view the meter drains, and after a
 //    while he searches where he last saw it.
 //
-// Christina's state machine also moves its own `position`; that is ignored
-// here, the body is the owner's position (see the code review in the README).
+// The body is the owner's position. (The state machine used to move its own
+// `position` to the noise; Antara's Nov 5 update fixed that and the stages
+// stepping down, both from the code review in the README.)
 //
 // Headings follow the cat's: h faces (cos h, 0, -sin h). No Three.js.
 
@@ -42,6 +44,18 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const headingTo = (from, to) => Math.atan2(-(to.z - from.z), to.x - from.x);
 const flat = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const VISION_EVERY = 4; // substeps between sight checks (30 Hz at 120 Hz)
+
+// Antara's search anchors: places to look from in each part of the room.
+// Some sit in furniture; the path then ends at the nearest free spot.
+const SEARCH_ANCHORS = {
+  northWest: [{ x: -2.3, z: -2.1 }, { x: -1.2, z: -1.8 }, { x: -0.8, z: -0.6 }],
+  northEast: [{ x: 1.8, z: -2.2 }, { x: 2.3, z: -1.3 }, { x: 0.8, z: -1.2 }],
+  southWest: [{ x: -1.8, z: 2.2 }, { x: -0.7, z: 2.0 }, { x: -1.1, z: 1.0 }],
+  southEast: [{ x: 2.0, z: 2.3 }, { x: 2.4, z: 1.3 }, { x: 0.8, z: 1.8 }],
+  west: [{ x: -2.6, z: -0.5 }, { x: -2.1, z: 1.0 }, { x: -1.0, z: -1.8 }],
+  east: [{ x: 2.6, z: 0.8 }, { x: 2.2, z: -1.1 }, { x: 1.0, z: 2.2 }],
+  center: [{ x: 0.6, z: 0.3 }, { x: -0.6, z: 1.4 }, { x: 1.8, z: -1.3 }],
+};
 
 /**
  * @param {ReturnType<import('../physics/world.js').createPhysicsWorld>} physics
@@ -76,6 +90,8 @@ export function createOwner(physics, opts) {
     spot: null,         // the hiding volume he is checking
     checked: new Set(), // hiding spots checked since he last got up
     noise: null,        // where the noise he is following came from
+    route: [],          // the rest of the search route for routeFor
+    routeFor: null,     // the sound or sighting the route is for
     seesCat: false,
     catDistance: Infinity,
     spotted: 0,         // 0..1; full means caught
@@ -103,12 +119,46 @@ export function createOwner(physics, opts) {
   const isUp = () => UP_MOTORS.has(state.motor);
   const here = () => ({ x: state.x, z: state.z });
 
+  function roomAreaOf(p) {
+    if (!p) return 'center';
+    const x = p.x ?? p[0] ?? 0;
+    const z = p.z ?? p[2] ?? 0;
+    if (z < -1.25) return x < -1 ? 'northWest' : 'northEast';
+    if (z > 1.25) return x < 0 ? 'southWest' : 'southEast';
+    if (x < -1.25) return 'west';
+    if (x > 1.25) return 'east';
+    return 'center';
+  }
+
+  /**
+   * Where to look for a sound or a lost cat at p: p itself first, then the
+   * search anchors of that part of the room, nearest first. Each search target
+   * gets its route once, so a fading suspicion can't send him round in circles.
+   */
+  function searchRoute(p) {
+    const anchors = (SEARCH_ANCHORS[roomAreaOf(p)] ?? SEARCH_ANCHORS.center)
+      .filter((a) => flat(a, p) > 0.8)
+      .sort((a, b) => flat(a, p) - flat(b, p))
+      .slice(0, cfg.sweepPoints ?? 2);
+    return [{ x: p.x, z: p.z }, ...anchors];
+  }
+
+  function nextSearchGoal(p) {
+    if (!state.routeFor || flat(state.routeFor, p) > 0.5) {
+      state.routeFor = { x: p.x, z: p.z };
+      state.route = searchRoute(p);
+    }
+    return state.route.shift() ?? null;
+  }
+
   /** The hiding spot whose check point is nearest p, skipping the ones checked already. */
   function nearestSpot(p, within = Infinity) {
     let best = null, bestD = within;
     for (const v of HIDING_VOLUMES) {
       if (state.checked.has(v.id)) continue;
-      const d = flat({ x: v.checkFrom[0], z: v.checkFrom[2] }, p);
+      const center = { x: (v.min[0] + v.max[0]) / 2, z: (v.min[2] + v.max[2]) / 2 };
+      const targetBias = v.id === 'underBed' && roomAreaOf(p) === 'west' ? -0.5 : 0;
+      const d = flat(center, p) + targetBias;
       if (d < bestD) { bestD = d; best = v; }
     }
     return best;
@@ -128,14 +178,15 @@ export function createOwner(physics, opts) {
 
   /** Between tasks while up: the behaviour tree's action says what next. */
   function decide() {
-    const target = brain.getTarget();
+    const target = brain.getTarget() ?? brain.getLastSeenCat();
     const at = target ? { x: target[0], z: target[2] } : null;
-    if ((state.action === 'search' || state.action === 'investigate') && at) {
-      state.noise = at;
-      return walkTo(at, 'noise');
-    }
-    if (state.action === 'checkHidingSpot') {
-      const v = nearestSpot(at ?? here());
+    if ((state.action === 'search' || state.action === 'investigate' || state.action === 'checkHidingSpot') && at) {
+      const goal = nextSearchGoal(at);
+      if (goal) {
+        state.noise = goal;
+        return walkTo(goal, 'noise');
+      }
+      const v = nearestSpot(at, 3.5);
       if (v) return checkSpot(v);
       brain.clearNoise();
     }
@@ -202,6 +253,7 @@ export function createOwner(physics, opts) {
     const c = cat.body.position;
     if (state.seesCat) {
       state.lastSeen = { x: c.x, z: c.z };
+      brain.trackLastSeenCat([c.x, 0, c.z]);
       state.lostFor = 0;
       if (isUp()) {
         wake.raise(1);
@@ -251,6 +303,8 @@ export function createOwner(physics, opts) {
           state.timer = cfg.getUpTime;
           state.progress = 0;
           state.checked.clear();
+          state.routeFor = null;
+          state.route = [];
         }
         break;
       }
@@ -280,8 +334,10 @@ export function createOwner(physics, opts) {
         state.look = 1.1 * Math.sin((1 - state.timer / cfg.scanTime) * Math.PI * 2);
         if (state.timer <= 0) {
           state.look = 0;
-          // Search nearby: the hiding spot closest to the noise, if it is close.
-          const v = nearestSpot(state.noise ?? here(), 3.0);
+          // More of the route to sweep: carry on. Otherwise check the hiding
+          // spot closest to the noise, if it is close.
+          if (state.route.length) { decide(); break; }
+          const v = nearestSpot(state.routeFor ?? state.noise ?? here(), 3.0);
           if (v) checkSpot(v);
           else done();
         }

@@ -156,6 +156,7 @@ export const tuning = {
     getUpTime: 1.4,          // s from sitting in bed to standing beside it
     lieDownTime: 1.6,        // s
     scanTime: 2.5,           // s he looks around where the noise was
+    sweepPoints: 2,          // search anchors he also checks round a noise or a lost cat (Antara's)
     crouchTime: 1.6,         // s he looks into a hiding spot
     visionRange: 5.5,        // m
     visionAngle: 0.85,       // rad, half-angle of his view
