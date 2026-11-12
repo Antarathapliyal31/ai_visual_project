@@ -277,6 +277,36 @@ const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy()
 scene.add(room.group);
 const meshFor = createPropLook(room.materials);
 
+// GPU memory across rounds: a new round throws away every prop mesh and the
+// cat, and they must give back their geometry, materials and textures, or
+// each round leaves ~135 geometries behind. What is shared (the room, the
+// owner, the props' common glazes) is kept.
+const KEEP = new Set(meshFor.shared);
+const texturesOf = (m) => Object.values(m).filter((v) => v && v.isTexture);
+function keepAll(root) {
+  root.traverse((o) => {
+    for (const m of [o.material].flat().filter(Boolean)) { KEEP.add(m); for (const t of texturesOf(m)) KEEP.add(t); }
+  });
+}
+function release(root) {
+  root.traverse((o) => {
+    o.geometry?.dispose();
+    if (o.isLight) o.dispose(); // a lamp's light and its shadow map
+    for (const m of [o.material].flat().filter(Boolean)) {
+      if (KEEP.has(m)) continue;
+      for (const t of texturesOf(m)) if (!KEEP.has(t)) t.dispose();
+      m.dispose();
+    }
+  });
+}
+keepAll(room.group);
+// Thrown-away meshes are released after the next frame has drawn: by then the
+// new round's materials hold the same shader programs, so none is freed and
+// compiled again.
+let released = [];
+function releaseLater(root) { released.push(root); }
+function releaseNow() { for (const root of released) release(root); released = []; }
+
 // A soft blob under the cat: where it is, and where it will land.
 const catShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
   new THREE.MeshBasicMaterial({ map: softShadow({ strength: 0.6 }), transparent: true, depthWrite: false, toneMapped: false }));
@@ -286,8 +316,10 @@ catShadow.renderOrder = 4;
 scene.add(catShadow);
 
 // The owner: model, animations, his view on the floor and the sign over his head.
-const ownerLook = createOwnerMesh({ onLoad: (model) => applyEnvironment(model, lights.mood.env) });
+const ownerLook = createOwnerMesh({ onLoad: (model) => { applyEnvironment(model, lights.mood.env); keepAll(model); } });
 scene.add(ownerLook.group);
+keepAll(ownerLook.group);
+keepAll(catShadow);
 
 // Noise you can see: a ring on the floor where something was heard, as big as it was loud.
 const rings = [];
@@ -334,8 +366,8 @@ function toast(text) {
 
 /** A fresh room: every prop back in place, the cat at the door, the owner asleep. */
 function newWorld() {
-  if (views) for (const mesh of views.values()) scene.remove(mesh);
-  if (catMesh) scene.remove(catMesh.group);
+  if (views) for (const mesh of views.values()) { scene.remove(mesh); releaseLater(mesh); }
+  if (catMesh) { scene.remove(catMesh.group); releaseLater(catMesh.group); }
   for (const r of rings) r.life = 0;
   physics = createPhysicsWorld({ onBroken: (info) => { broken++; toast(`${info.kind[0].toUpperCase()}${info.kind.slice(1)} smashed`); } });
   const sceneProps = spawnRoomScene(physics);
@@ -535,7 +567,7 @@ function frame(dt) {
     }
   }
   for (const [body, mesh] of views) {
-    if (!live.has(body)) { scene.remove(mesh); views.delete(body); }
+    if (!live.has(body)) { scene.remove(mesh); releaseLater(mesh); views.delete(body); }
   }
 
   const still = round.state === 'paused' ? 0 : dt;
@@ -584,8 +616,10 @@ $('bestLine').textContent = bestLine();
 show('menu');
 
 // The full lighting is the expensive part. If this machine can't hold it,
-// step down: fewer pixels first, then the plain render.
+// step down: fewer pixels first (under 55 FPS, which the brush hides, e.g. a
+// fanless laptop that has got hot), then the plain render (under 40).
 const QUALITY = [() => renderer.setPixelRatio(Math.min(devicePixelRatio, 1)), () => { pipeline.enabled = false; }];
+const QUALITY_FLOOR = [55, 40]; // FPS below which each step is taken
 let quality = 0, fpsFrames = 0, fpsTime = 0, slowFor = 0;
 const warmUntil = performance.now() + 4000; // shaders compile and the owner loads: not a slow machine
 function watchFrameRate(elapsed) {
@@ -595,9 +629,9 @@ function watchFrameRate(elapsed) {
   if (fpsTime < 0.5) return;
   const fps = fpsFrames / fpsTime;
   $('fps').textContent = `${Math.round(fps)} fps`;
-  slowFor = fps < 40 && document.visibilityState === 'visible' ? slowFor + fpsTime : 0;
+  slowFor = quality < QUALITY.length && fps < QUALITY_FLOOR[quality] && document.visibilityState === 'visible' ? slowFor + fpsTime : 0;
   fpsFrames = fpsTime = 0;
-  if (slowFor >= 2.5 && quality < QUALITY.length) {
+  if (slowFor >= 3 && quality < QUALITY.length) {
     QUALITY[quality++]();
     resize();
     slowFor = 0;
@@ -615,6 +649,7 @@ function tick() {
   frame(dt);
   controls.update();
   pipeline.render();
+  releaseNow();
 }
 tick();
 
@@ -624,7 +659,7 @@ window.game = {
   round, keys, camera, controls, renderer, scene,
   frame, play, toMenu, pause, resume, setNight, homeCamera,
   pipeline,
-  render() { controls.update(); pipeline.render(); },
+  render() { controls.update(); pipeline.render(); releaseNow(); },
 };
 </script>
 </body>

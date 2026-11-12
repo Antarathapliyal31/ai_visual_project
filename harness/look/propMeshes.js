@@ -504,7 +504,7 @@ export function createPropLook(mats) {
     return new THREE.Mesh(new THREE.CylinderGeometry(v.radiusTop ?? v.radius, v.radiusBottom ?? v.radius, v.height, 20), plain);
   }
 
-  return function meshFor(record) {
+  function meshFor(record) {
     const v = record.visual;
     // Seeded by spawn order, so a book keeps its cover across resets.
     const s = stream(record.serial ?? record.body.id);
@@ -541,5 +541,10 @@ export function createPropLook(mats) {
       }
     });
     return mesh;
-  };
+  }
+  // What every prop shares, so a page that throws prop meshes away (a new
+  // round) disposes only what each one owns: its geometry, and the glaze and
+  // texture made for it alone.
+  meshFor.shared = [plateGlaze, bisque, paper, glowTexture, faceTexture, yarnTexture, screenTexture, keysTexture, plateGlaze.map];
+  return meshFor;
 }
