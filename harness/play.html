@@ -46,9 +46,15 @@
   .plaque small { display:block; font-size:12px; font-weight:600; opacity:.85; margin-top:4px; }
   #ownerPlaque { min-width:260px; }
   #ownerPlaque.alert { border-color:var(--alert); box-shadow:inset 0 0 0 2px var(--wood-edge), 0 0 18px rgba(239,90,58,.8); }
-  .meter { position:relative; width:150px; height:12px; margin-top:6px; border-radius:6px; background:#3a2110; box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.45); overflow:hidden; }
+  .meter { display:block; position:relative; width:150px; height:12px; margin-top:6px; border-radius:6px; background:#3a2110; box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.45); overflow:hidden; }
   .meter i { position:absolute; inset:0 auto 0 0; width:0; background:linear-gradient(90deg, #f1d36a, #f1953a 55%, #ef5a3a); transition:width .12s; }
   .meter u { position:absolute; top:0; bottom:0; width:2px; background:rgba(40,18,4,.75); }
+  /* Antara's suspicion phase: how sure he is that something is up. */
+  #ownerMood { display:flex; align-items:center; gap:3px; margin-top:6px; }
+  #ownerMood i { width:8px; height:8px; border-radius:50%; background:rgba(40,18,4,.6); box-shadow:inset 0 0 0 1px rgba(0,0,0,.35); }
+  #ownerMood i.on { background:#f1a23a; }
+  #ownerMood i.on.hot { background:#ef5a3a; }
+  #ownerMood span { margin-left:5px; }
   #hint { position:fixed; left:38px; bottom:32px; font-size:13px; font-weight:600; padding:7px 14px 8px; gap:8px; opacity:.92; z-index:2; pointer-events:none; }
   #hint kbd, .card kbd, #problem kbd { font:inherit; font-size:12px; padding:1px 6px 2px; border-radius:5px; background:rgba(40,18,4,.55); border:1px solid rgba(219,165,92,.55); }
   #toast { position:fixed; left:50%; top:104px; transform:translateX(-50%); font-size:17px; padding:9px 20px 10px; z-index:2;
@@ -106,7 +112,8 @@
     <svg viewBox="0 0 32 32" aria-hidden="true"><g fill="#f3d9a6" stroke="#5a3215" stroke-width="1.6" stroke-linejoin="round">
       <circle cx="16" cy="10" r="6"/><path d="M5 29c1-8 5-12 11-12s10 4 11 12z"/></g></svg>
     <span><span id="ownerText">Asleep</span>
-      <span class="meter" id="wakeMeter"><i id="wakeFill"></i></span></span>
+      <span class="meter" id="wakeMeter"><i id="wakeFill"></i></span>
+      <small id="ownerMood"><i></i><i></i><i></i><i></i><span id="moodText">Not suspicious</span></small></span>
   </div>
 </div>
 <div id="toast" class="plaque"></div>
@@ -207,7 +214,9 @@ const stage = $('stage');
 
 // --------------------------------------------------------------- renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+// 1.25 device pixels per CSS pixel at most: on a Retina screen the full look then
+// holds 60 FPS (1.5 did not), and the brush hides the difference.
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -461,6 +470,10 @@ const OWNER_TEXT = {
   lyingDown: () => 'Back to sleep',
   caught: () => 'Caught you!',
 };
+// Antara's suspicion phases (src/ai/ownerStateMachine.js), as the player reads them.
+const MOODS = { calm: [1, 'Not suspicious'], alert: [2, 'Suspicious'], searching: [3, 'Looking for you'], hunting: [4, 'Hunting you'] };
+const pips = [...document.querySelectorAll('#ownerMood i')];
+let shownMood = null;
 const marks = tuning.owner.thresholds;
 for (const k of ['stirring', 'sittingUp', 'standing']) {
   const u = document.createElement('u');
@@ -475,6 +488,13 @@ function hud() {
   $('clock').textContent = clock(Math.ceil(round.timeLeft));
   $('ownerText').textContent = OWNER_TEXT[s.motor]?.(s) ?? s.stage;
   $('wakeFill').style.width = `${(noise.wake * 100).toFixed(1)}%`;
+  const mood = owner.brain.getSuspicionPhase?.() ?? 'calm';
+  if (mood !== shownMood) {
+    shownMood = mood;
+    const [level, text] = MOODS[mood] ?? MOODS.calm;
+    pips.forEach((pip, k) => { pip.classList.toggle('on', k < level); pip.classList.toggle('hot', level >= 3 && k < level); });
+    $('moodText').textContent = text;
+  }
   const alarmed = s.seesCat && s.motor !== 'inBed';
   $('ownerPlaque').classList.toggle('alert', alarmed || s.motor === 'chasing' || s.motor === 'caught');
   $('spotted').style.opacity = round.playing && s.seesCat ? (0.35 + 0.65 * s.spotted).toFixed(2) : s.motor === 'caught' ? '0.8' : '0';
@@ -565,7 +585,7 @@ show('menu');
 
 // The full lighting is the expensive part. If this machine can't hold it,
 // step down: fewer pixels first, then the plain render.
-const QUALITY = [() => renderer.setPixelRatio(Math.min(devicePixelRatio, 1.15)), () => renderer.setPixelRatio(1), () => { pipeline.enabled = false; }];
+const QUALITY = [() => renderer.setPixelRatio(Math.min(devicePixelRatio, 1)), () => { pipeline.enabled = false; }];
 let quality = 0, fpsFrames = 0, fpsTime = 0, slowFor = 0;
 const warmUntil = performance.now() + 4000; // shaders compile and the owner loads: not a slow machine
 function watchFrameRate(elapsed) {
