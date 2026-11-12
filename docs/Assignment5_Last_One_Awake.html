@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CS 549 Assignment 5: Last One Awake</title>
+<style>
+  @page { size: Letter; margin: 0.5in 0.55in; }
+  * { box-sizing: border-box; }
+  body { font: 9pt/1.3 "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 14.5pt; margin: 0 0 2pt; }
+  h2 { font-size: 11pt; margin: 7pt 0 3pt; padding-bottom: 1.5pt; border-bottom: 0.75pt solid #999; }
+  h3 { font-size: 9.2pt; margin: 5pt 0 1.5pt; }
+  p { margin: 0 0 4pt; }
+  a { color: #0b4f9c; text-decoration: none; }
+  .meta { color: #333; margin-bottom: 4pt; }
+  .links { border: 0.75pt solid #999; padding: 4pt 7pt; margin: 3pt 0 2pt; }
+  .links p { margin: 0 0 1.5pt; }
+  .links p:last-child { margin: 0; }
+  code { font: 8.1pt Menlo, Consolas, monospace; }
+  ul { margin: 0 0 3pt; padding-left: 13pt; }
+  li { margin-bottom: 1.5pt; }
+  figure { float: right; width: 3.55in; margin: 1pt 0 4pt 10pt; }
+  figure img { width: 100%; display: block; border: 0.5pt solid #999; }
+  figcaption { font-size: 7.6pt; color: #333; margin-top: 2pt; line-height: 1.25; }
+  table { border-collapse: collapse; width: 100%; margin: 3pt 0 4pt; font-size: 8.2pt; line-height: 1.25; }
+  th, td { border: 0.5pt solid #999; padding: 2pt 3.5pt; vertical-align: top; text-align: left; }
+  th { background: #eee; }
+  td.wk { white-space: nowrap; font-weight: 600; }
+  tr.buffer td { background: #f3f3f3; }
+  tr { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+  .who { color: #444; font-weight: 600; }
+  .num { white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<h1>CS 549 · Assignment 5: Beta Build</h1>
+<p class="meta"><b>Last One Awake</b>, a 3D stealth game about a cat wrecking an apartment at 3 a.m.<br>
+Group: Rushi Patel (leader), Dharm Patel, Antara Thapliyal, Christina Ross · Mentor: Danrui Li · State of the build on Nov 11, 2026.<br>
+Pillars: <b>physics &amp; dynamics</b> (first), <b>collision detection</b> and <b>NPC AI</b> (secondary). Three.js + cannon-es in the browser, no engine.</p>
+
+<div class="links">
+  <p><b>Playable beta (hosted):</b> <a href="https://antarathapliyal31.github.io/ai_visual_project/harness/play.html">https://antarathapliyal31.github.io/ai_visual_project/harness/play.html</a></p>
+  <p><b>Build zip:</b> <a href="https://github.com/Antarathapliyal31/ai_visual_project/archive/refs/heads/Rushi.zip">https://github.com/Antarathapliyal31/ai_visual_project/archive/refs/heads/Rushi.zip</a> · Unzip, run <code>python3 -m http.server 8550</code> in the folder, open <code>localhost:8550/harness/play.html</code>.</p>
+  <p><b>Source code (public):</b> <a href="https://github.com/Antarathapliyal31/ai_visual_project/tree/Rushi">https://github.com/Antarathapliyal31/ai_visual_project</a> (branch <code>Rushi</code>) · <code>npm install &amp;&amp; npm test</code> runs 261 headless tests.</p>
+</div>
+
+<h2>1. Quick review: our first pillar</h2>
+<figure>
+  <img src="img/beta-searching.jpg" alt="The beta: the owner searching by the desk, the HUD, the cat's silhouette under the bed">
+  <figcaption>The beta: a sound sent the owner to the desk, where he looks around (his view on the floor, “?” over his head). The HUD shows what he is doing, the wake meter and his suspicion. His duvet is thrown back, and the cat hiding under the bed shows through it as a silhouette.</figcaption>
+</figure>
+<p><b>Physics &amp; dynamics.</b> Every object in the room is a rigid body. cannon-es's own solver could not keep five stacked plates still (they walked 130 mm in a minute) and its friction was 120× too strong at our 120 Hz step, so we replaced only its solve step with our own (warm starting, a true Coulomb friction bound, contact reduction, soft contacts for light props). Five plates now drift 0.02 mm in 60 s with sleeping off, 13 plates hold, a sliding box stops within 2% of v²/2μg, at the same 3.6 ms per step. On collision, a swept-sphere guard stops fast swats tunneling through the 2 cm shelf (0 of 100 at 12 m/s, against 22 of 100 without it).</p>
+
+<h2>2. Secondary pillar integration: how the AI is part of the loop</h2>
+<p>The owner is driven by the physics, not by a script. Every 1/120 s:</p>
+<ul>
+  <li><b>Physics to noise.</b> After each solve, the new contacts' impulses, summed per pair of bodies, become loudness (material pair × ln(1 + J/0.3 N·s); the cat's paws are padded), falling off with distance to his head. It fills a <b>wake meter</b> that drains slowly. Tested: the same swat sits him up from beside the bed (0.55) and leaves him asleep from the far wall (0.10).</li>
+  <li><b>Noise to mind.</b> Christina's state machine turns the meter into stages (asleep, stirring, sitting up, standing, awake) and Antara's beta update adds a <b>suspicion meter</b> (calm, alert, searching, hunting) that remembers the last sound and the last place he saw the cat. A behaviour tree, now a selector over a blackboard, picks the action: investigate, search, check a hiding spot, or go back to bed.</li>
+  <li><b>Mind to the room.</b> He walks A* paths between 12 waypoints, his footprint swept against the furniture, as a kinematic body that pushes props aside (and those make noise too). He goes to the sound, sweeps that part of the room using Antara's search anchors, then crouches to check the nearest hiding spot. His sight is a view cone confirmed by line-of-sight rays from the collision layer, so hiding comes from geometry: the bed skirt hides the cat, the desk does not.</li>
+  <li><b>Back to the loop.</b> Seen for long enough (or within 75 cm) the cat is caught and the round is lost; survive to dawn and it is won. The player reads all of it on screen: noise rings where he heard something, his view on the floor, the HUD's wake meter and suspicion, and a red screen edge while he can see you.</li>
+</ul>
+
+<h2>3. Beta release notes: changes since the Alpha (Assignment 4, Oct 26)</h2>
+<h3>New features</h3>
+<ul>
+  <li><b>The owner's new mind</b> <span class="who">(Antara, on Christina's module; integrated in the game by Rushi)</span>: suspicion phases, area memory and search patterns. In the game he searches the sound first, then sweeps that part of the room, nearest anchor first, before checking a hiding spot; each sound gets its route once, so a fading suspicion cannot send him in circles (new test).</li>
+  <li><b>His suspicion in the HUD</b>: four pips and a word (“Not suspicious” to “Hunting you”) under the wake meter.</li>
+  <li><b>The full painted look at 60 FPS on a Retina laptop</b>. In the alpha, every post-processing pass read and wrote a 4× multisampled buffer. Now only the scene render is multisampled, ambient occlusion runs at half resolution and bloom at a quarter, at a 1.25 render scale. Frame cost <span class="num">30 ms → 12 ms</span>, with frame-by-frame comparisons showing the same picture. The alpha manages about 21 FPS on the same screen.</li>
+  <li><b>He sleeps under the covers</b>: a duvet in the bed's blanket, shaped over his body, folds back as he sits up.</li>
+  <li><b>The cat shows through furniture</b> (an Assignment 2 must-have): under the bed or behind the couch it appears as a warm silhouette (a depth-tested twin plus a stencil mask, so its own legs never show through its body).</li>
+</ul>
+<h3>Bug fixes</h3>
+<ul>
+  <li>The two state-machine bugs from our Oct 22 review: his stages never stepped back down, and the state machine moved him to the noise <span class="who">(Antara)</span>.</li>
+  <li>Every new round leaked GPU memory: 10 restarts grew from 381 to 1,731 geometries and 28 to 73 MB. It is now flat at 246 geometries and 24 MB, and a restart still takes about 0.1 s.</li>
+  <li>The HUD's wake meter bar never showed (it had no width); asleep, the owner lay on top of the blanket.</li>
+</ul>
+<h3>Performance and stability (measured)</h3>
+<p>Measured in Chrome on an Apple M4 MacBook Air, at 1470 × 820 CSS px on a 2× screen:</p>
+<ul>
+  <li><b>60 FPS with all 79 bodies awake and sleeping off</b>, against a target of 60 FPS with 60 awake bodies. A physics step takes 2.0 ms.</li>
+  <li><b>No errors</b> in a minute of random input with pauses, rounds ending and five restarts. Bodies and props stay constant across restarts.</li>
+</ul>
+<h3>Known issues</h3>
+<ul>
+  <li>On a fanless laptop that has been under load for a long time, the full look drops to 45–55 FPS. The game then lowers its render scale to 1.0 by itself; the plain render (<code>P</code>) holds 60. Not yet run in Firefox or Safari. No sound yet.</li>
+  <li>Sitting up in bed is still shown as kneeling (the model has no sitting clip). Under the bed is always safe: he cannot lift the skirt.</li>
+  <li>The behaviour tree's new suspicion thresholds and the search anchors are written into the code rather than <code>tuning.js</code>; three anchors sit inside furniture, so his path stops at the nearest free spot.</li>
+  <li>The <code>Rushi</code> branch (the hosted build) is not merged into <code>main</code> yet.</li>
+</ul>
+
+<h2>4. Schedule for the rest of the semester, Weeks 11–14</h2>
+<p><b>Week 10 (Nov 2–8), plan against outcome:</b></p>
+<ul>
+  <li><b>Done:</b> the state-machine fixes and the behaviour-tree runtime (Antara, Nov 5).</li>
+  <li><b>Moved to this build:</b> the owner under the blanket.</li>
+  <li><b>Slipped to Weeks 11–13:</b> the merge into <code>main</code>, the Vite build and CI, and the 200–400-body owner test.</li>
+</ul>
+<table>
+  <tr><th style="width:13%">Week</th><th style="width:46%">Engineering</th><th style="width:21%">Assets</th><th>Integration and milestone</th></tr>
+  <tr><td class="wk">11 · Nov 9–15<br>this build</td>
+    <td><b>Done:</b> Antara's AI update in the game with the search sweep; full look at 60 FPS on Retina; GPU memory per round; cat silhouette. <b>Left:</b> Firefox and Safari runs; his hearing radius once awake; suspicion thresholds and anchors into <code>tuning.js</code> <span class="who">(C)</span>.</td>
+    <td><b>Done:</b> owner under the duvet. <b>Left:</b> UI icons and title art.</td>
+    <td>Beta hosted from <code>Rushi</code>. <b>Integration:</b> merge <code>Rushi</code> into <code>main</code>, one build and one URL (from Week 10).</td></tr>
+  <tr><td class="wk">12 · Nov 16–22</td>
+    <td>Difficulty tuning from playtests (catch time, wake gain, noise falloff, suspicion decay); chaos score detail; round summary screen. Vite build and CI running the tests <span class="who">(D)</span>.</td>
+    <td>Sound, a could-have: AI-generated smashes, thuds, footsteps and a dawn alarm; sit-up and lie-down poses.</td>
+    <td>Feature freeze Nov 22; playtests with classmates.</td></tr>
+  <tr><td class="wk">13 · Nov 23–29</td>
+    <td>Fixes from playtests; the owner and debris at 200–400 bodies <span class="who">(A)</span>; stability with full debris. (Thanksgiving week: a light load.)</td>
+    <td>Final art pass; demo video storyboard.</td>
+    <td>Release candidate on <code>main</code>.</td></tr>
+  <tr class="buffer"><td class="wk">14 · Nov 30–Dec 6<br>Buffer week</td>
+    <td>Bug fixing, documentation and polish only. No new features.</td>
+    <td>None.</td>
+    <td>README, report and final video; final submission.</td></tr>
+</table>
+
+</body>
+</html>

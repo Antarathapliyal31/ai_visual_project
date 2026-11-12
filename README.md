@@ -25,6 +25,21 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## Beta build (Assignment 5, Nov 11): the owner's new mind, 60 FPS, and a game that looks finished
+
+Same game loop, same URLs (`harness/play.html`; hosted from the `Rushi` branch). `npm test` runs 261 tests in 22 files.
+
+- **Antara's owner AI update is in the game** (`src/ai/ownerStateMachine.js`, `behaviorTree.js`; merged from `christina`). The state machine's stages now step back down as he calms, and it no longer moves him to the noise (both from Dharm's Oct 22 review). The behaviour tree is a selector over a blackboard. He keeps a suspicion meter with four phases (calm, alert, searching, hunting), remembers which part of the room things happened in, and picks a search pattern. In the game (`owner.js`) he walks to the sound first, then sweeps that part of the room with Antara's search anchors, nearest first (`tuning.owner.sweepPoints`), then checks the nearest hiding spot; each sound gets its route once.
+- **The HUD shows his suspicion phase**, four pips and a word under the wake meter, and the **wake meter bar itself now shows**: it was an inline element with no width, so only its stage marks were ever drawn.
+- **The full look at 60 FPS on a Retina screen** (`look/pipeline.js`). In the alpha every post-processing pass read and wrote a 4x multisampled half-float buffer, which cost more than everything else together. Now only the scene render is multisampled, ambient occlusion runs at half resolution and bloom starts at a quarter: 30 ms a frame -> 12 ms, same picture (compared frame by frame). The render scale is 1.25 at most. Measured in Chrome on an Apple M4 at 1470 x 820 CSS px on a 2x screen: 60 FPS, also with all 79 bodies awake and sleeping off (the alpha: about 21). The quality watchdog steps down to a 1.0 render scale under 55 FPS (a fanless laptop that has got hot) and to the plain render under 40.
+- **He sleeps under the covers** (`look/ownerMesh.js`): a duvet in the bed's own blanket, shaped over his body as the model lies, folds back to the foot of the bed as he sits up and stays thrown back while he is up. His raised arm is laid along his side in bed.
+- **The cat shows through furniture** (`look/catMesh.js`, an Assignment 2 must-have): under the bed or behind the couch you see a warm silhouette. Each cat mesh has a twin drawn only where it is behind something, and the cat marks its own pixels in the stencil buffer so its far legs never show through its body.
+- **GPU memory is given back every round.** A new round threw the old prop meshes and cat away without disposing them: each round left ~135 geometries behind (10 restarts: 381 -> 1,731 geometries, 28 -> 73 MB). Now it stays at 246 geometries and 24 MB, and a restart still takes about 0.1 s.
+
+Still open, for the next weeks: sitting up is still shown as kneeling (the model has no sitting clip); under the bed is always safe; no sound; not yet run in Firefox or Safari; the `Rushi` branch is not merged into `main` yet; the behaviour tree's new suspicion thresholds (0.18, 0.35) and the search anchors are written into the code, not `tuning.js`.
+
+---
+
 ## Alpha build (Assignment 4, Oct 26): the whole game loop
 
 `harness/play.html` is now the game: a start menu, a 3-minute night with a pause screen (`Esc`), and two endings, caught (loss) or dawn (win), then play again. The owner is in it and the noise reaches him. Run `python3 -m http.server 8550` in the repo root and open `http://localhost:8550/harness/play.html`; hosted, it is `https://antarathapliyal31.github.io/ai_visual_project/harness/play.html` (GitHub Pages serves the `Rushi` branch). `npm test` runs 254 tests in 22 files.
