@@ -13,6 +13,15 @@
 // weave. Set `enabled = false` (or press P in play.html) to fall back to the
 // plain render, e.g. on a slow GPU; `paint.enabled` (B) turns just the brush
 // off.
+//
+// Cost (beta): ambient occlusion was most of the frame, so it runs at half
+// the resolution (`aoScale`): its depth and normal prepass, the occlusion
+// and the denoise all work on a quarter of the pixels, and the result is
+// blended back with smooth filtering. Bloom only lights the lamps, so its
+// first level starts at a quarter (`bloomScale`). The brush would smear any
+// difference. And only the scene is multisampled: in the alpha every pass
+// read and wrote a 4x multisampled buffer, which on a Retina screen cost more
+// than everything else together.
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -21,6 +30,8 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import { CopyShader } from 'three/addons/shaders/CopyShader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 /** The backdrop behind the room, painted into the scene so the canvas can be opaque. */
@@ -92,6 +103,7 @@ function canvasWeave() {
  * calmest. Runs on the finished, tone-mapped picture.
  */
 const PaintShader = {
+  defines: { REACH: 3 }, // patch size: (REACH + 1)^2 texels in each of the four
   uniforms: {
     tDiffuse: { value: null },
     tField: { value: null },
@@ -120,7 +132,6 @@ const PaintShader = {
     uniform float stretch;
     uniform float grain;
     varying vec2 vUv;
-    #define REACH 3
 
     void main() {
       float angle = texture2D(tField, vUv * fieldScale).r * 6.2832;
@@ -161,6 +172,39 @@ const PaintShader = {
 };
 
 /**
+ * The scene, rendered into its own multisampled buffer and copied into the
+ * composer's plain one, so only this render pays for the antialiasing.
+ */
+class MultisampleRenderPass extends Pass {
+  constructor(scene, camera, samples) {
+    super();
+    this.scene = scene;
+    this.camera = camera;
+    this.needsSwap = false;
+    this.target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples, stencilBuffer: true }); // stencil: the cat's silhouette
+    this.copy = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.clone(CopyShader.uniforms),
+      vertexShader: CopyShader.vertexShader,
+      fragmentShader: CopyShader.fragmentShader,
+      blending: THREE.NoBlending,
+      depthTest: false,
+      depthWrite: false,
+    }));
+  }
+
+  setSize(w, h) { this.target.setSize(w, h); }
+
+  render(renderer, writeBuffer, readBuffer) {
+    renderer.setRenderTarget(this.target);
+    renderer.clear();
+    renderer.render(this.scene, this.camera);
+    this.copy.material.uniforms.tDiffuse.value = this.target.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : readBuffer);
+    this.copy.render(renderer);
+  }
+}
+
+/**
  * Scale every material's reflections under `root`. Each material keeps its
  * own base strength in userData.env (default 0.5).
  */
@@ -177,21 +221,31 @@ export function applyEnvironment(root, factor) {
  * @param {THREE.WebGLRenderer} renderer
  * @param {THREE.Scene} scene
  * @param {THREE.Camera} camera
+ * @param {object} [opts]
+ * @param {number} [opts.aoScale=0.5]     ambient occlusion resolution, as a share of the frame's
+ * @param {number} [opts.bloomScale=0.5]  bloom resolution, as a share of the frame's
+ * @param {number} [opts.samples=4]       MSAA samples of the scene render
  */
-export function createPipeline(renderer, scene, camera) {
+export function createPipeline(renderer, scene, camera, opts = {}) {
+  const scales = { ao: opts.aoScale ?? 0.5, bloom: opts.bloomScale ?? 0.5 };
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
   pmrem.dispose();
 
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 }));
-  composer.addPass(new RenderPass(scene, camera));
+  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType }));
+  const samples = opts.samples ?? 4;
+  composer.addPass(samples > 0 ? new MultisampleRenderPass(scene, camera, samples) : new RenderPass(scene, camera));
 
-  const ao = new GTAOPass(scene, camera, size.x, size.y);
+  const ao = new GTAOPass(scene, camera, Math.round(size.x * scales.ao), Math.round(size.y * scales.ao));
+  // The composer sizes every pass to the frame; this one works at its own scale.
+  const aoSetSize = ao.setSize.bind(ao);
+  ao.setSize = (w, h) => aoSetSize(Math.max(1, Math.round(w * scales.ao)), Math.max(1, Math.round(h * scales.ao)));
   // World-space radius: creases and contact within most of a metre, fading with distance.
   ao.updateGtaoMaterial({ radius: 0.8, distanceExponent: 1, thickness: 2, scale: 2.6, samples: 16, distanceFallOff: 0.6, screenSpaceRadius: false });
   // Denoised hard: the brush would turn any speckle left in the shading into smudges.
-  ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 14, radiusExponent: 1, rings: 3, samples: 24 });
+  // The denoise radius is in AO pixels: 14 at full resolution, scaled with it.
+  ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 14 * scales.ao, radiusExponent: 1, rings: 3, samples: 24 });
   // Glows, light shafts and shadow decals are not surfaces: keep them out of the depth and normal pass.
   const hide = ao.overrideVisibility.bind(ao);
   ao.overrideVisibility = function overrideVisibility() {
@@ -211,7 +265,9 @@ export function createPipeline(renderer, scene, camera) {
   };
   composer.addPass(ao);
 
-  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.2, 0.75, 0.95);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x * scales.bloom, size.y * scales.bloom), 0.2, 0.75, 0.95);
+  const bloomSetSize = bloom.setSize.bind(bloom);
+  bloom.setSize = (w, h) => bloomSetSize(Math.max(2, Math.round(w * scales.bloom)), Math.max(2, Math.round(h * scales.bloom)));
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -222,14 +278,24 @@ export function createPipeline(renderer, scene, camera) {
 
   const pipeline = {
     enabled: true,
-    ao, bloom, paint, composer,
+    ao, bloom, paint, composer, scales,
+    /** Brush patch size; fewer texels per pixel for the same dab. */
+    setBrushReach(reach) {
+      paint.material.defines.REACH = reach;
+      paint.material.needsUpdate = true;
+    },
+    /** MSAA samples of the scene render. */
+    setSamples(n) {
+      const first = composer.passes[0];
+      if (first.target) { first.target.samples = n; first.target.dispose(); }
+    },
     setSize(w, h) {
       const ratio = renderer.getPixelRatio();
       composer.setPixelRatio(ratio);
       composer.setSize(w, h);
       // The brush is sized in screen pixels, so it looks the same at any resolution.
       // Small enough that the cat's stripes and the spines of books survive it.
-      const dab = 0.72; // CSS pixels per brush step
+      const dab = (0.72 * 3) / paint.material.defines.REACH; // CSS pixels per brush step: the same dab at any reach
       paint.uniforms.step.value.set(dab / w, dab / h);
       paint.uniforms.fieldScale.value.set(w / 420, h / 420); // the stroke direction turns every few hundred pixels
       paint.uniforms.canvasScale.value.set((w * ratio) / 512, (h * ratio) / 512); // one thread is two device pixels

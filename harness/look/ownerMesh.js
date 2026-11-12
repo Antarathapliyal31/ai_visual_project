@@ -3,7 +3,9 @@
 //
 // The clips come with the model: Idle, Walk, Run, Working (kneels and looks
 // at the floor), Punch, Jump and Death. Asleep he is the Idle pose (breathing)
-// laid flat on his back along the bed, head on the pillow; sitting up he turns
+// laid flat on his back along the bed, head on the pillow, under a duvet in
+// the bed's own blanket that folds back towards the foot of the bed as he
+// sits up and stays thrown back while he is out of bed; sitting up he turns
 // up into the first frame of Working, on his knees in bed; getting up blends
 // from there to Idle at the bedside. Up and about he walks, runs when he chases the cat, and kneels
 // (Working) to look under the bed or the desk. His head follows where he is
@@ -15,6 +17,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { blanket, wrinkles } from './textures.js';
 import { BED_LIE, BEDSIDE } from '../../src/ai/home.js';
 
 const MODEL_URL = '../demo/public/models/demo-avatar.glb';
@@ -27,6 +30,41 @@ const Q_LIE = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().m
   new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)));
 const Q_KNEEL = new THREE.Quaternion().setFromAxisAngle(UP, BED_YAW);
 const LIE_AT = new THREE.Vector3(-3.22 + HEIGHT, MATTRESS + 0.08, BED_LIE.z); // his feet; head on the pillow
+// The duvet over him, measured on the model as it lies: on his side (the
+// standing Idle pose laid down), feet at 0.88 m, head on the pillow past
+// -2.85. Idle leaves his upper arm raised, so in bed it is laid along his
+// side (ARM_DOWN) and stays under the covers. So the duvet is pulled
+// up to his shoulders, full height over his torso and arm, easing down along
+// his legs, and draped down to the bed at its sides and its foot. Its
+// underside sits just inside the bed's blanket (top at 0.734 m).
+const DUVET = { head: -2.77, foot: -1.38, bottom: 0.70, top: 1.13, shoulder: 0.93, knees: 1.0, z: -0.09, half: 0.58 };
+// Asleep, his upper arm and forearm point this way: along his side, towards his feet.
+const ARM_DOWN = new THREE.Vector3(1, -0.22, 0.04).normalize();
+const smoothstep = (a, b, t) => smooth(clamp01((t - a) / (b - a)));
+
+/** The duvet's shape, with x from -length (his shoulders) to 0 (the foot of the bed). */
+function duvetGeometry() {
+  const length = DUVET.foot - DUVET.head;
+  const geo = new THREE.BoxGeometry(length, 1, DUVET.half * 2, 40, 1, 24);
+  geo.translate(-length / 2, 0.5, 0);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    if (p.getY(i) < 0.5) { p.setY(i, 0); continue; }
+    const u = 1 + p.getX(i) / length;        // 0 at his shoulders, 1 at the foot
+    const w = Math.abs(p.getZ(i)) / DUVET.half; // 0 down the middle, 1 at its sides
+    // Along him: a fold at the shoulders, full over the torso, easing down the legs, down at the foot.
+    const along = DUVET.top - (DUVET.top - DUVET.shoulder) * (1 - smoothstep(0, 0.07, u))
+      - (DUVET.top - DUVET.knees) * smoothstep(0.42, 0.9, u)
+      - (DUVET.knees - DUVET.bottom) * smoothstep(0.9, 1, u);
+    // Across: rounded over his body, draping down to the bed at the sides.
+    const across = 1 - smoothstep(0.3, 1, w);
+    // A few soft folds, so it reads as cloth.
+    const folds = 0.012 * Math.sin(u * 23 + w * 3) * across;
+    p.setY(i, Math.max(0, (along - DUVET.bottom) * across + folds));
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
 const KNEEL_AT = new THREE.Vector3(-2.75, MATTRESS, BED_LIE.z);
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
@@ -80,7 +118,21 @@ export function createOwnerMesh(opts = {}) {
 
   const body = new THREE.Group(); // the model's placement
   group.add(body);
-  let model = null, mixer = null, neck = null, headTop = null;
+
+  // --- the duvet, in the bed's own striped blanket
+  const duvetMat = new THREE.MeshStandardMaterial({ map: blanket(), bumpMap: wrinkles(), bumpScale: 5, roughness: 0.95 });
+  duvetMat.userData.env = 0.2;
+  const duvet = new THREE.Mesh(duvetGeometry(), duvetMat);
+  duvet.castShadow = true;
+  duvet.receiveShadow = true;
+  duvet.position.set(DUVET.foot, DUVET.bottom, DUVET.z);
+  group.add(duvet);
+  /** Pulled up to his shoulders (1), or thrown back in a heap at the foot of the bed (0). */
+  function placeDuvet(cover) {
+    duvet.scale.set(0.4 + 0.6 * cover, 0.55 + 0.45 * cover, 1);
+  }
+  placeDuvet(1);
+  let model = null, mixer = null, neck = null, headTop = null, arm = null;
   const actions = {};
   const weights = { kneel: 0, idle: 1, walk: 0, run: 0, work: 0, punch: 0 };
   let rise = 0, time = 0, lastMotor = 'inBed', punchT = 0;
@@ -97,6 +149,7 @@ export function createOwnerMesh(opts = {}) {
       if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; }
     });
     neck = model.getObjectByName('Neck');
+    arm = ['LeftArm', 'LeftForeArm', 'LeftHand'].map((n) => model.getObjectByName(n));
     headTop = model.getObjectByName('HeadTop_End');
     mixer = new THREE.AnimationMixer(model);
     const clip = (name) => gltf.animations.find((a) => a.name === name);
@@ -132,6 +185,20 @@ export function createOwnerMesh(opts = {}) {
   }
 
   const qNeck = new THREE.Quaternion(), qParent = new THREE.Quaternion(), qTurn = new THREE.Quaternion();
+  const vFrom = new THREE.Vector3(), vTo = new THREE.Vector3(), qAim = new THREE.Quaternion(), qWorld = new THREE.Quaternion();
+  const NO_TURN = new THREE.Quaternion();
+  /** Turn a bone so its child lies along `dir` (world), by share `amount`, on top of the animation. */
+  function aimBone(bone, child, dir, amount) {
+    if (!bone || !child || amount <= 0) return;
+    bone.getWorldPosition(vFrom);
+    child.getWorldPosition(vTo);
+    qAim.setFromUnitVectors(vTo.sub(vFrom).normalize(), dir);
+    if (amount < 1) qAim.slerp(NO_TURN, 1 - amount);
+    bone.getWorldQuaternion(qWorld);
+    bone.parent.getWorldQuaternion(qParent);
+    bone.quaternion.copy(qParent.invert().multiply(qAim.multiply(qWorld)));
+    bone.updateMatrixWorld(true);
+  }
   /** Turn a bone about the world's up axis, on top of what the animation set. */
   function turnBone(bone, angle) {
     if (!bone || !angle) return;
@@ -167,6 +234,7 @@ export function createOwnerMesh(opts = {}) {
           blendTo({ idle: 1 - rise, kneel: rise }, dt);
           // Stirring: he shifts under the covers.
           if (s.stage === 'stirring') pos.z += Math.sin(time * 2.2) * 0.03;
+          placeDuvet(1 - r);
         } else if (getting || lyingDown) {
           // Off the bed (or back onto it): kneeling at the head of the bed <-> standing at the bedside.
           const p = getting ? smooth(clamp01(s.progress)) : smooth(clamp01(1 - s.progress * 2));
@@ -175,7 +243,9 @@ export function createOwnerMesh(opts = {}) {
           pos.y = MATTRESS * (1 - p) + Math.sin(p * Math.PI) * 0.12;
           turn.setFromAxisAngle(UP, BED_YAW + (yawFor(0) - BED_YAW) * p);
           blendTo({ kneel: 1 - p, walk: Math.sin(p * Math.PI), idle: p }, dt, 12);
+          placeDuvet(0);
         } else {
+          placeDuvet(0);
           pos.set(s.x, 0, s.z);
           turn.setFromAxisAngle(UP, yawFor(s.heading));
           if (m !== lastMotor && m === 'caught') { actions.punch?.reset().play(); punchT = 0; }
@@ -195,6 +265,12 @@ export function createOwnerMesh(opts = {}) {
         model.updateMatrixWorld(true);
         // His head turns to where he is looking (scanning, or towards a noise from bed).
         turnBone(neck, Math.max(-1.1, Math.min(1.1, s.look * (inBed ? 1 : 0.8))));
+        // Lying down, his arm along his side, under the covers.
+        if (arm && (inBed || (lyingDown && s.progress >= 0.5))) {
+          const down = 1 - smooth(rise);
+          aimBone(arm[0], arm[1], ARM_DOWN, down);
+          aimBone(arm[1], arm[2], ARM_DOWN, down);
+        }
       }
 
       // The fan: where he can see, while his eyes are open.

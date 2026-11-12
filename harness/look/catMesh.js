@@ -23,6 +23,13 @@
 // the feet; at speed the body leans into the turn and pitches with speed
 // changes, and the tail swings out. The lag is a few degrees and visual only:
 // the collider, the paw and the swat still use the controller's heading.
+//
+// Seen through furniture (an Assignment 2 must-have): where anything stands
+// between the camera and the cat, under the bed or behind the couch, the cat
+// shows as a warm silhouette. Every cat mesh has a twin drawn only where it
+// is behind something (GreaterDepth), and the cat marks its own pixels in the
+// stencil buffer so its far legs never show through its own body. The render
+// target needs a stencil buffer (look/pipeline.js gives it one).
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -245,6 +252,25 @@ export function createCatMesh(dims) {
   group.traverse((o) => {
     if (o.isMesh) o.castShadow = o.receiveShadow = true;
   });
+
+  const ghost = new THREE.MeshBasicMaterial({
+    color: 0xffd9a0, transparent: true, opacity: 0.5, toneMapped: false,
+    depthWrite: false, depthFunc: THREE.GreaterDepth,
+    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.KeepStencilOp,
+  });
+  const solid = [];
+  group.traverse((o) => { if (o.isMesh) solid.push(o); });
+  for (const mesh of solid) {
+    for (const m of [mesh.material].flat()) {
+      m.stencilWrite = true;
+      m.stencilRef = 1;
+      m.stencilZPass = THREE.ReplaceStencilOp;
+    }
+    const twin = new THREE.Mesh(mesh.geometry, ghost);
+    twin.renderOrder = 6;
+    twin.userData.noAO = true;
+    mesh.add(twin);
+  }
 
   let stride = 0, time = 0, swat = 0, lastSwats = 0, air = 0, lowTail = 0, blink = 0, nextBlink = 2;
   let yaw = null, yawRate = 0, lean = 0, surge = 0, lastSpeed = 0, tailSwing = 0;
