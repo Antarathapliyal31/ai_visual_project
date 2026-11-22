@@ -119,6 +119,39 @@ export function createOwnerMesh(opts = {}) {
   const body = new THREE.Group(); // the model's placement
   group.add(body);
 
+  // --- where his bed is. Everything about lying, sitting up and climbing out
+  // is measured on the original room's bed (the constants above); a level
+  // that moves the bed moves all of it with the bed's transform.
+  let bed = { from: { x: 0, z: 0 }, to: { x: 0, z: 0 }, yaw: 0 };
+  let bedside = BEDSIDE, bedsideHeading = 0, sitEye = { x: BED_LIE.x - 0.55, z: BED_LIE.z };
+  const qBed = new THREE.Quaternion(), armDown = ARM_DOWN.clone();
+  const bedOuter = new THREE.Group(), bedInner = new THREE.Group();
+  bedOuter.add(bedInner);
+  group.add(bedOuter);
+  /** A point measured on the original bed, where this level's bed has it (in place). */
+  function onBed(v) {
+    const c = Math.cos(bed.yaw), sn = Math.sin(bed.yaw);
+    const dx = v.x - bed.from.x, dz = v.z - bed.from.z;
+    v.x = bed.to.x + dx * c + dz * sn;
+    v.z = bed.to.z - dx * sn + dz * c;
+    return v;
+  }
+  /** @param {object} [home]  a level's home (src/levels); left out, the original bed */
+  function setHome(home) {
+    const moved = home?.bed;
+    bed = moved ? { from: moved.from, to: moved.to, yaw: moved.yaw } : { from: { x: 0, z: 0 }, to: { x: 0, z: 0 }, yaw: 0 };
+    bedside = moved ? home.bedside : BEDSIDE;
+    bedsideHeading = moved ? home.bedsideHeading : 0;
+    sitEye = moved ? home.sitEye : { x: BED_LIE.x - 0.55, z: BED_LIE.z };
+    qBed.setFromAxisAngle(UP, bed.yaw);
+    armDown.copy(ARM_DOWN).applyQuaternion(qBed);
+    bedOuter.position.set(bed.to.x, 0, bed.to.z);
+    bedOuter.rotation.y = bed.yaw;
+    bedInner.position.set(-bed.from.x, 0, -bed.from.z);
+    onBed(pos.copy(LIE_AT));
+    turn.copy(qBed).multiply(Q_LIE);
+  }
+
   // --- the duvet, in the bed's own striped blanket
   const duvetMat = new THREE.MeshStandardMaterial({ map: blanket(), bumpMap: wrinkles(), bumpScale: 5, roughness: 0.95 });
   duvetMat.userData.env = 0.2;
@@ -126,7 +159,7 @@ export function createOwnerMesh(opts = {}) {
   duvet.castShadow = true;
   duvet.receiveShadow = true;
   duvet.position.set(DUVET.foot, DUVET.bottom, DUVET.z);
-  group.add(duvet);
+  bedInner.add(duvet);
   /** Pulled up to his shoulders (1), or thrown back in a heap at the foot of the bed (0). */
   function placeDuvet(cover) {
     duvet.scale.set(0.4 + 0.6 * cover, 0.55 + 0.45 * cover, 1);
@@ -210,6 +243,7 @@ export function createOwnerMesh(opts = {}) {
 
   return {
     group,
+    setHome,
     /**
      * @param {number} dt
      * @param {object} s  the owner's `state` from src/ai/owner.js
@@ -230,18 +264,21 @@ export function createOwnerMesh(opts = {}) {
           // In bed: lying flat on his back, turning up onto his knees as he sits up.
           const r = smooth(rise);
           pos.lerpVectors(LIE_AT, KNEEL_AT, r);
-          turn.slerpQuaternions(Q_LIE, Q_KNEEL, r);
-          blendTo({ idle: 1 - rise, kneel: rise }, dt);
           // Stirring: he shifts under the covers.
           if (s.stage === 'stirring') pos.z += Math.sin(time * 2.2) * 0.03;
+          onBed(pos);
+          turn.slerpQuaternions(Q_LIE, Q_KNEEL, r).premultiply(qBed);
+          blendTo({ idle: 1 - rise, kneel: rise }, dt);
           placeDuvet(1 - r);
         } else if (getting || lyingDown) {
           // Off the bed (or back onto it): kneeling at the head of the bed <-> standing at the bedside.
           const p = getting ? smooth(clamp01(s.progress)) : smooth(clamp01(1 - s.progress * 2));
-          const bedside = new THREE.Vector3(BEDSIDE.x, 0, BEDSIDE.z);
-          pos.lerpVectors(KNEEL_AT, bedside, p);
+          const kneel = onBed(KNEEL_AT.clone());
+          pos.lerpVectors(kneel, new THREE.Vector3(bedside.x, 0, bedside.z), p);
           pos.y = MATTRESS * (1 - p) + Math.sin(p * Math.PI) * 0.12;
-          turn.setFromAxisAngle(UP, BED_YAW + (yawFor(0) - BED_YAW) * p);
+          // From facing down the bed to facing the way he stands at the bedside, the short way round.
+          const from = BED_YAW + bed.yaw, to = yawFor(bedsideHeading);
+          turn.setFromAxisAngle(UP, from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * p);
           blendTo({ kneel: 1 - p, walk: Math.sin(p * Math.PI), idle: p }, dt, 12);
           placeDuvet(0);
         } else {
@@ -268,8 +305,8 @@ export function createOwnerMesh(opts = {}) {
         // Lying down, his arm along his side, under the covers.
         if (arm && (inBed || (lyingDown && s.progress >= 0.5))) {
           const down = 1 - smooth(rise);
-          aimBone(arm[0], arm[1], ARM_DOWN, down);
-          aimBone(arm[1], arm[2], ARM_DOWN, down);
+          aimBone(arm[0], arm[1], armDown, down);
+          aimBone(arm[1], arm[2], armDown, down);
         }
       }
 
@@ -285,7 +322,7 @@ export function createOwnerMesh(opts = {}) {
           fan.geometry = new THREE.CircleGeometry(s.viewRange, 40, -s.viewAngle, 2 * s.viewAngle);
           fan.userData.key = key;
         }
-        const eye = inBedView ? { x: BED_LIE.x - 0.55, z: BED_LIE.z } : { x: s.x, z: s.z };
+        const eye = inBedView ? sitEye : { x: s.x, z: s.z };
         fanPivot.position.set(eye.x, 0.02, eye.z);
         fanPivot.rotation.y = s.heading + s.look;
         fanMat.color.setRGB(1, 0.82 - 0.5 * s.spotted, 0.48 - 0.3 * s.spotted);

@@ -9,7 +9,8 @@
   meter (src/noise), the owner (src/ai, around C's state machine and behaviour
   tree) and the round (src/core/round.js), drawn by the render layer in
   harness/look/. Everything that moves is the real simulation from src/;
-  nothing here writes to it except the cat's input.
+  nothing here writes to it except the cat's input. The room is one of the
+  levels in src/levels (the original first), picked on the menu.
 
   Serve the repo root over HTTP (ES modules don't load from file://):
     python3 -m http.server 8550
@@ -82,6 +83,14 @@
   .card button.quiet { background:linear-gradient(var(--wood-hi), var(--wood-lo)); font-size:16px; }
   .card button:hover, .card button:focus-visible { border-color:#ffe0a8; outline:none; filter:brightness(1.12); }
   .card .best { font-size:14px; opacity:.9; }
+  /* The rooms to play: the original first, then the ones built from the inventory. */
+  .card .levels { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; }
+  .card .levels button { text-align:left; font-size:15px; padding:8px 12px 9px; background:linear-gradient(var(--wood-hi), var(--wood-lo)); }
+  .card .levels button[aria-pressed="true"] { border-color:#ffe0a8; background:linear-gradient(#b8742e, #7c4618); }
+  .card .levels small { display:block; font-size:11.5px; font-weight:600; opacity:.85; margin-top:3px; }
+  .card .levels .won::after { content:" \2713"; color:#ffe08a; }
+  .card #levelAbout { font-size:14px; }
+  .card #levelAbout small { display:block; font-size:12px; opacity:.75; margin-top:4px; }
   #endTitle.caught { color:#ff9a7a; }
   #endTitle.won { color:#ffe08a; }
 
@@ -136,6 +145,8 @@
       <span><kbd>J</kbd></span><span>swat what's in front of you</span>
       <span><kbd>Esc</kbd></span><span>pause</span>
     </div>
+    <div class="levels" id="levels" role="group" aria-label="Room"></div>
+    <p id="levelAbout"></p>
     <div class="row"><button id="playBtn">Play</button></div>
     <p class="best" id="bestLine"></p>
   </div>
@@ -151,12 +162,13 @@
 <div class="screen" id="end" hidden>
   <div class="card plaque">
     <h2 id="endTitle">Caught!</h2>
+    <p class="tag" id="endRoom"></p>
     <p id="endLine"></p>
     <div class="stats">
       <span><b id="endScore">0</b>chaos</span><span><b id="endKnocked">0</b>knocked over</span><span><b id="endBroken">0</b>broken</span><span><b id="endTime">0:00</b>survived</span>
     </div>
     <p class="best" id="endBest"></p>
-    <div class="row"><button id="againBtn">Play again</button><button class="quiet" id="endMenuBtn">Main menu</button></div>
+    <div class="row"><button id="nextBtn" hidden>Next room</button><button id="againBtn">Play again</button><button class="quiet" id="endMenuBtn">Main menu</button></div>
   </div>
 </div>
 
@@ -195,10 +207,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { tuning } from '../src/core/tuning.js';
 import { createRound } from '../src/core/round.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
-import { createPhysicsWorld, spawnRoomScene } from '../src/physics/index.js';
+import { createPhysicsWorld } from '../src/physics/index.js';
 import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
 import { createNoise } from '../src/noise/index.js';
 import { createOwner } from '../src/ai/index.js';
+import { LEVELS, loadLevel, INVENTORY } from '../src/levels/index.js';
 import { buildRoom } from './look/room.js';
 import { createPropLook } from './look/propMeshes.js';
 import { createCatMesh } from './look/catMesh.js';
@@ -209,6 +222,14 @@ import { softShadow } from './look/textures.js';
 
 const DT = tuning.physics.fixedStep;
 const BEST_KEY = 'loa.bestChaos';
+const LEVEL_KEY = 'loa.level', WON_KEY = 'loa.wonLevels';
+const stored = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
+const store = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
+
+// --------------------------------------------------------------- level
+let levelIndex = Math.max(0, LEVELS.findIndex((l) => l.id === stored(LEVEL_KEY, 'original')));
+let level = loadLevel(LEVELS[levelIndex]);
+const wonLevels = new Set(stored(WON_KEY, []));
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
 
@@ -273,7 +294,7 @@ resize();
 homeCamera();
 
 // ------------------------------------------------------------------- room
-const room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy() });
+let room = buildRoom({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy(), level });
 scene.add(room.group);
 const meshFor = createPropLook(room.materials);
 
@@ -300,6 +321,26 @@ function release(root) {
   });
 }
 keepAll(room.group);
+/** Draw another level's room. The shared materials stay (the props use them); the old room's own go. */
+function switchRoom() {
+  const old = room;
+  room = buildRoom({ level, materials: old.materials });
+  keepAll(room.group);
+  const inNew = new Set();
+  room.group.traverse((o) => { for (const m of [o.material].flat().filter(Boolean)) { inNew.add(m); for (const t of texturesOf(m)) inNew.add(t); } });
+  old.group.traverse((o) => {
+    for (const m of [o.material].flat().filter(Boolean)) {
+      if (inNew.has(m) || old.materials.owns(m)) continue;
+      KEEP.delete(m);
+      for (const t of texturesOf(m)) if (!inNew.has(t) && !old.materials.owns(t)) KEEP.delete(t);
+    }
+  });
+  scene.remove(old.group);
+  releaseLater(old.group);
+  scene.add(room.group);
+  ownerLook.setHome(level.legacy ? null : level.home);
+  setNight(night); // the window, the aquarium and the environment on the new room
+}
 // Thrown-away meshes are released after the next frame has drawn: by then the
 // new round's materials hold the same shader programs, so none is freed and
 // compiled again.
@@ -369,9 +410,12 @@ function newWorld() {
   if (views) for (const mesh of views.values()) { scene.remove(mesh); releaseLater(mesh); }
   if (catMesh) { scene.remove(catMesh.group); releaseLater(catMesh.group); }
   for (const r of rings) r.life = 0;
-  physics = createPhysicsWorld({ onBroken: (info) => { broken++; toast(`${info.kind[0].toUpperCase()}${info.kind.slice(1)} smashed`); } });
-  const sceneProps = spawnRoomScene(physics);
-  cat = createCat(physics, { position: [0.3, tuning.cat.radius + 0.001, 0.9], heading: -0.6 }); // facing the viewer
+  physics = createPhysicsWorld({
+    ...(level.legacy ? {} : { room: { boxes: level.boxes, occluders: level.occluders } }),
+    onBroken: (info) => { broken++; toast(`${info.kind[0].toUpperCase()}${info.kind.slice(1)} smashed`); },
+  });
+  const sceneProps = level.spawnProps(physics);
+  cat = createCat(physics, { position: level.cat.position, heading: level.cat.heading }); // facing the viewer
   catMesh = createCatMesh(cat.dims);
   applyEnvironment(catMesh.group, lights.mood.env);
   scene.add(catMesh.group);
@@ -382,6 +426,7 @@ function newWorld() {
   });
   owner = createOwner(physics, {
     cat,
+    level,
     wake: noise.meter,
     onCaught: () => { caughtAt = performance.now(); round.caught(); toast('Caught!'); },
   });
@@ -412,6 +457,43 @@ function show(screen) {
 function bestLine() {
   return round.best > 0 ? `Best chaos so far: ${round.best}` : '';
 }
+// The level picker on the menu: name, hiding places, a tick once survived till dawn.
+const hidingCount = (spec) => spec.pieces.reduce((n, p) => n + (INVENTORY[p.item]?.hiding?.length ?? 0), 0);
+function showLevels() {
+  const box = $('levels');
+  box.replaceChildren(...LEVELS.map((spec, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(i === levelIndex));
+    const name = document.createElement('span');
+    name.textContent = spec.name;
+    if (wonLevels.has(spec.id)) name.className = 'won';
+    const about = document.createElement('small');
+    about.textContent = `${hidingCount(spec)} hiding places`;
+    b.append(name, about);
+    b.onclick = () => { selectLevel(i); $('playBtn').focus(); };
+    return b;
+  }));
+  const spec = LEVELS[levelIndex];
+  const by = document.createElement('small');
+  by.textContent = `Furniture placed by ${spec.designedBy}.`;
+  $('levelAbout').replaceChildren(document.createTextNode(spec.blurb ?? ''), by);
+}
+function selectLevel(i) {
+  i = Math.max(0, Math.min(LEVELS.length - 1, i));
+  if (i !== levelIndex) {
+    levelIndex = i;
+    level = loadLevel(LEVELS[i]);
+    store(LEVEL_KEY, level.id);
+    switchRoom();
+    newWorld();
+  }
+  showLevels();
+}
+function nextLevel() {
+  selectLevel(levelIndex + 1);
+  play();
+}
 function play() {
   newWorld();
   round.start();
@@ -425,6 +507,7 @@ function toMenu() {
   keys.clear();
   homeCamera();
   $('bestLine').textContent = bestLine();
+  showLevels();
   show('menu');
 }
 function pause() {
@@ -441,6 +524,11 @@ function end() {
   const won = round.state === 'won';
   const record = round.score > 0 && round.score >= round.best && round.score > (Number(localStorage.getItem(BEST_KEY)) || 0);
   try { localStorage.setItem(BEST_KEY, String(round.best)); } catch {}
+  if (won && !wonLevels.has(level.id)) { wonLevels.add(level.id); store(WON_KEY, [...wonLevels]); }
+  const next = won && levelIndex < LEVELS.length - 1;
+  $('nextBtn').hidden = !next;
+  $('nextBtn').textContent = next ? `Next room: ${LEVELS[levelIndex + 1].name}` : 'Next room';
+  $('endRoom').textContent = level.name;
   $('endTitle').textContent = won ? 'Dawn!' : 'Caught!';
   $('endTitle').className = won ? 'won' : 'caught';
   $('endLine').textContent = won
@@ -452,12 +540,14 @@ function end() {
   $('endTime').textContent = clock(round.elapsed);
   $('endBest').textContent = record ? 'A new best!' : bestLine();
   show('end');
+  if (next) $('nextBtn').focus();
 }
 $('playBtn').onclick = play;
 $('resumeBtn').onclick = resume;
 $('restartBtn').onclick = play;
 $('pauseMenuBtn').onclick = toMenu;
 $('againBtn').onclick = play;
+$('nextBtn').onclick = nextLevel;
 $('endMenuBtn').onclick = toMenu;
 
 // ------------------------------------------------------------------ input
@@ -474,8 +564,10 @@ addEventListener('keydown', (e) => {
     // Enter always takes the screen's main button, wherever focus is; nothing reaches the cat.
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
       e.preventDefault();
-      ({ menu: play, pause: resume, end: play })[screen]?.();
+      ({ menu: play, pause: resume, end: $('nextBtn').hidden ? play : nextLevel })[screen]?.();
     }
+    // Left and right pick the room on the menu.
+    if (screen === 'menu' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) selectLevel(levelIndex + (e.code === 'ArrowRight' ? 1 : -1));
     if (e.code === 'KeyN') setNight(!night);
     return;
   }
@@ -496,11 +588,15 @@ const OWNER_TEXT = {
   gettingUp: () => 'Getting up!',
   walking: (s) => (s.purpose === 'hide' ? 'Checking hiding spots' : s.purpose === 'bed' ? 'Going back to bed' : 'Coming to look'),
   scanning: () => 'Looking around',
-  crouching: (s) => (s.spot?.id === 'underBed' ? 'Looking under the bed' : 'Looking under the desk'),
+  crouching: (s) => SPOT_TEXT[s.spot?.id.split('#')[0]] ?? 'Checking a hiding spot',
   waiting: () => 'Listening, by the bed',
   chasing: () => 'He sees you!',
   lyingDown: () => 'Back to sleep',
   caught: () => 'Caught you!',
+};
+const SPOT_TEXT = {
+  underBed: 'Looking under the bed', underDesk: 'Looking under the desk', underTable: 'Looking under the table',
+  underArmchair: 'Looking under the armchair', inBox: 'Looking in the box',
 };
 // Antara's suspicion phases (src/ai/ownerStateMachine.js), as the player reads them.
 const MOODS = { calm: [1, 'Not suspicious'], alert: [2, 'Suspicious'], searching: [3, 'Looking for you'], hunting: [4, 'Hunting you'] };
@@ -571,7 +667,7 @@ function frame(dt) {
   }
 
   const still = round.state === 'paused' ? 0 : dt;
-  catMesh.update(still, cat, { low: hidingSpotAt(cat.body.position) !== null });
+  catMesh.update(still, cat, { low: hidingSpotAt(cat.body.position, level.hidingVolumes) !== null });
   ownerLook.update(still, owner.state);
   room.update((sceneTime += dt));
   updateRings(still);
@@ -610,9 +706,11 @@ function frame(dt) {
   hud();
 }
 
+ownerLook.setHome(level.legacy ? null : level.home);
 newWorld();
 setNight(false);
 $('bestLine').textContent = bestLine();
+showLevels();
 show('menu');
 
 // The full lighting is the expensive part. If this machine can't hold it,
@@ -657,7 +755,8 @@ tick();
 window.game = {
   get physics() { return physics; }, get cat() { return cat; }, get owner() { return owner; }, get noise() { return noise; },
   round, keys, camera, controls, renderer, scene,
-  frame, play, toMenu, pause, resume, setNight, homeCamera,
+  frame, play, toMenu, pause, resume, setNight, homeCamera, selectLevel,
+  get level() { return level; }, get room() { return room; },
   pipeline,
   render() { controls.update(); pipeline.render(); releaseNow(); },
 };

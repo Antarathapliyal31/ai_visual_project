@@ -57,6 +57,12 @@ const SEARCH_ANCHORS = {
   center: [{ x: 0.6, z: 0.3 }, { x: -0.6, z: 1.4 }, { x: 1.8, z: -1.3 }],
 };
 
+// The original room's bed (home.js): where he lies, sits up and gets out.
+const ORIGINAL_HOME = {
+  head: BED_HEAD, lie: BED_LIE, sitEye: BED_SIT_EYE, facing: IN_BED_FACING,
+  bedside: BEDSIDE, bedsideHeading: 0, waitLookAt: { x: 0, z: -1.0 },
+};
+
 /**
  * @param {ReturnType<import('../physics/world.js').createPhysicsWorld>} physics
  * @param {object} opts
@@ -64,12 +70,18 @@ const SEARCH_ANCHORS = {
  * @param {{level: number, raise: (to: number) => void}} opts.wake  the noise model's meter
  * @param {() => void} [opts.onCaught]
  * @param {(stage: string, previous: string) => void} [opts.onStage]
+ * @param {ReturnType<import('../levels/index.js').loadLevel>} [opts.level]  the level
+ *   (src/levels); left out, or the original level, he plays the original room
  */
 export function createOwner(physics, opts) {
   const cfg = physics.tuning.owner;
   const { cat, wake } = opts;
-  const brain = createOwnerAI({ thresholds: cfg.thresholds, bedPosition: [BED_LIE.x, 0, BED_LIE.z] });
-  const nav = createNavigator({ radius: cfg.radius, height: cfg.height });
+  const level = opts.level?.legacy ? null : opts.level;
+  const home = level?.home ?? ORIGINAL_HOME;
+  const volumes = level?.hidingVolumes ?? HIDING_VOLUMES;
+  const anchorsFor = level?.searchAnchors ?? SEARCH_ANCHORS;
+  const brain = createOwnerAI({ thresholds: cfg.thresholds, bedPosition: [home.lie.x, 0, home.lie.z] });
+  const nav = createNavigator({ radius: cfg.radius, height: cfg.height, ...(level && { boxes: level.boxes, waypoints: level.waypoints }) });
 
   // Never asleep: a sleeping body ignores the velocities set to walk it.
   const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, allowSleep: false, collisionFilterGroup: OWNER, collisionFilterMask: 0 });
@@ -81,7 +93,7 @@ export function createOwner(physics, opts) {
     motor: 'inBed',     // inBed, gettingUp, walking, scanning, crouching, waiting, chasing, lyingDown, caught
     stage: 'asleep',
     action: 'idle',
-    x: BED_LIE.x, z: BED_LIE.z, heading: IN_BED_FACING,
+    x: home.lie.x, z: home.lie.z, heading: home.facing,
     look: 0,            // extra yaw of his gaze: scanning, or turning his head in bed
     timer: 0,           // time left in a timed motor state
     progress: 0,        // 0..1 through getting up or lying down, for the renderer
@@ -114,7 +126,7 @@ export function createOwner(physics, opts) {
     state.heading = heading;
   }
   const solid = (on) => { body.collisionFilterMask = on ? (PROP | DEBRIS | CAT) : 0; };
-  place(BED_LIE.x, BED_LIE.z, IN_BED_FACING);
+  place(home.lie.x, home.lie.z, home.facing);
 
   const isUp = () => UP_MOTORS.has(state.motor);
   const here = () => ({ x: state.x, z: state.z });
@@ -136,7 +148,7 @@ export function createOwner(physics, opts) {
    * gets its route once, so a fading suspicion can't send him round in circles.
    */
   function searchRoute(p) {
-    const anchors = (SEARCH_ANCHORS[roomAreaOf(p)] ?? SEARCH_ANCHORS.center)
+    const anchors = (anchorsFor[roomAreaOf(p)] ?? anchorsFor.center)
       .filter((a) => flat(a, p) > 0.8)
       .sort((a, b) => flat(a, p) - flat(b, p))
       .slice(0, cfg.sweepPoints ?? 2);
@@ -154,10 +166,11 @@ export function createOwner(physics, opts) {
   /** The hiding spot whose check point is nearest p, skipping the ones checked already. */
   function nearestSpot(p, within = Infinity) {
     let best = null, bestD = within;
-    for (const v of HIDING_VOLUMES) {
+    for (const v of volumes) {
       if (state.checked.has(v.id)) continue;
       const center = { x: (v.min[0] + v.max[0]) / 2, z: (v.min[2] + v.max[2]) / 2 };
-      const targetBias = v.id === 'underBed' && roomAreaOf(p) === 'west' ? -0.5 : 0;
+      // A noise on the bed's side of the room: under the bed first.
+      const targetBias = v.id === 'underBed' && roomAreaOf(p) === roomAreaOf(center) ? -0.5 : 0;
       const d = flat(center, p) + targetBias;
       if (d < bestD) { bestD = d; best = v; }
     }
@@ -190,7 +203,7 @@ export function createOwner(physics, opts) {
       if (v) return checkSpot(v);
       brain.clearNoise();
     }
-    return walkTo(BEDSIDE, 'bed');
+    return walkTo(home.bedside, 'bed');
   }
 
   /** The noise he was following has been dealt with. */
@@ -243,7 +256,7 @@ export function createOwner(physics, opts) {
       if (state.eyeHeight === null) {
         state.seesCat = false;
       } else {
-        const base = inBed ? BED_SIT_EYE : { x: state.x + Math.cos(state.heading) * 0.12, z: state.z - Math.sin(state.heading) * 0.12 };
+        const base = inBed ? home.sitEye : { x: state.x + Math.cos(state.heading) * 0.12, z: state.z - Math.sin(state.heading) * 0.12 };
         const eye = { x: base.x, y: state.eyeHeight, z: base.z };
         const r = seesCat(physics.raycast, eye, state.heading + state.look, cat, { range: state.viewRange, angle: cfg.visionAngle, skip: [body] });
         state.seesCat = r.seen;
@@ -296,7 +309,7 @@ export function createOwner(physics, opts) {
         body.velocity.set(0, 0, 0);
         // Stirring or sitting up, he turns his head towards the noise.
         const t = brain.getTarget();
-        const want = t && state.stage !== 'asleep' ? wrap(headingTo(BED_SIT_EYE, { x: t[0], z: t[2] }) - IN_BED_FACING) : 0;
+        const want = t && state.stage !== 'asleep' ? wrap(headingTo(home.sitEye, { x: t[0], z: t[2] }) - home.facing) : 0;
         state.look += (Math.max(-1.2, Math.min(1.2, want)) - state.look) * Math.min(1, dt * 3);
         if (UP_STAGES.has(state.stage)) {
           state.motor = 'gettingUp';
@@ -312,7 +325,7 @@ export function createOwner(physics, opts) {
         state.timer -= dt;
         state.progress = Math.min(1, 1 - state.timer / cfg.getUpTime);
         if (state.timer <= 0) {
-          place(BEDSIDE.x, BEDSIDE.z, 0); // facing the room
+          place(home.bedside.x, home.bedside.z, home.bedsideHeading); // facing the room
           solid(true);
           state.look = 0;
           if (state.seesCat && state.lastSeen) walkTo(state.lastSeen, 'cat');
@@ -359,7 +372,7 @@ export function createOwner(physics, opts) {
       case 'waiting':
         // By the bed, looking around, until the meter calms down; any new job sends him off again.
         body.velocity.set(0, 0, 0);
-        faceTowards({ x: 0, z: -1.0 }, dt);
+        faceTowards(home.waitLookAt, dt);
         state.timer += dt;
         state.look = 0.6 * Math.sin(state.timer * 0.9);
         if (state.action === 'search' || state.action === 'checkHidingSpot') decide();
@@ -390,7 +403,7 @@ export function createOwner(physics, opts) {
         state.timer -= dt;
         state.progress = Math.min(1, 1 - state.timer / cfg.lieDownTime);
         if (state.timer <= 0) {
-          place(BED_LIE.x, BED_LIE.z, IN_BED_FACING);
+          place(home.lie.x, home.lie.z, home.facing);
           state.motor = 'inBed';
           state.progress = 0;
         }
@@ -419,7 +432,7 @@ export function createOwner(physics, opts) {
 
   /** Where he hears from: his pillow in bed, his head when he is up. */
   function head() {
-    if (state.motor === 'inBed' || state.motor === 'gettingUp' || state.motor === 'lyingDown') return BED_HEAD;
+    if (state.motor === 'inBed' || state.motor === 'gettingUp' || state.motor === 'lyingDown') return home.head;
     return { x: state.x, y: cfg.height - 0.1, z: state.z };
   }
 

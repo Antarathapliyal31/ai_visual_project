@@ -78,6 +78,10 @@ export function createMaterials(maxAnisotropy = 8) {
       }
       return cache.get(key);
     },
+    /** Is this one of the materials or textures made here (shared by every room and the props)? */
+    owns(x) {
+      return x === grain || x === weave || x === hide || x === pile || [...cache.values()].includes(x);
+    },
     plain(color, roughness = 0.7, metalness = 0) {
       const key = `p${color}:${roughness}:${metalness}`;
       if (!cache.has(key)) cache.set(key, new THREE.MeshStandardMaterial({ color, roughness, metalness }));

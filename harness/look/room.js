@@ -1,17 +1,27 @@
-// The room, drawn from A's static geometry.
+// The room, drawn from a level's pieces (src/levels).
 //
-// Every solid in STATIC_BOXES and every occluder becomes a mesh styled by its
-// id (falling back to its material name, so furniture added to the store
-// later still gets wood or cloth). On top of that comes dressing that needs
-// no collider: rugs, baseboards, the window, pictures, drawer fronts, the
-// blanket, and soft contact shadows.
+// The shell (the floor, the two walls the camera sees, baseboards and the
+// creases where they meet) is the same in every level. Each piece of
+// furniture is drawn where it stands in the original room, from its
+// canonical boxes in the inventory, inside a group that moves and turns it
+// to where the level puts it: the same transform (piece.T) that placed its
+// colliders. So the original room is drawn exactly as before, and a desk on
+// the west wall is the same desk, turned.
 //
-// Nothing here is physical. If it should stop the cat, it belongs in
-// src/collision/staticGeometry.js, not in this file.
+// Every solid becomes a mesh styled by its id (falling back to its material
+// name, so furniture added later still gets wood or cloth). On top of that
+// comes dressing that needs no collider: rugs, the window, pictures, drawer
+// fronts, the blanket, tape on the boxes, and soft contact shadows.
+//
+// Nothing here is physical. If it should stop the cat, it belongs in the
+// colliders (src/collision/staticGeometry.js, src/levels/inventory.js).
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { STATIC_BOXES, OCCLUDERS, ROOM, SURFACES } from '../../src/collision/index.js';
+import { STATIC_BOXES, ROOM, SURFACES } from '../../src/collision/index.js';
+import { SHELL_IDS } from '../../src/levels/inventory.js';
+import { ORIGINAL, compileLevel } from '../../src/levels/index.js';
+import { pictureSpots, rugSpots } from '../../src/levels/decor.js';
 import * as tex from './textures.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GRAIN_TILE, roundedBox, createMaterials } from './materials.js';
@@ -29,6 +39,11 @@ export const PALETTE = {
   wood: 0x9a6230, cloth: 0xb9ae9c,
   brass: 0xd8a84a,
   frame: 0x7a4a22, windowFrame: 0xc98f4a, blinds: 0x3f72b8,
+  // The pieces that came with the levels.
+  tableTop: 0x8a5a32, tablecloth: 0xe6d8bd,
+  armchair: 0x6f8a62, armchairLeg: 0x4a2e18,
+  cardboard: 0xb98b57, tape: 0xd9c38f,
+  wardrobe: 0x8a5530, wardrobeDoor: 0x9a6239,
 };
 
 function styleFor(spec) {
@@ -44,17 +59,30 @@ function styleFor(spec) {
   if (id.startsWith('bookshelf')) return { type: 'wood', color: P.shelf, radius: 0.006 };
   if (id === 'windowSill') return { type: 'wood', color: P.sill, radius: 0.008 };
   if (id === 'wallShelf') return { type: 'wood', color: P.shelf, radius: 0.004 };
+  if (id.startsWith('diningTable')) return { type: 'wood', color: P.tableTop, radius: 0.01 };
+  if (id.startsWith('armchairLeg')) return { type: 'wood', color: P.armchairLeg, radius: 0.008 };
+  if (id.startsWith('armchair')) return { type: 'cloth', color: P.armchair, radius: 0.045 };
+  if (id.startsWith('box')) return { type: 'plain', color: P.cardboard, radius: 0.004 };
+  if (id.startsWith('wardrobe')) return { type: 'wood', color: P.wardrobe, radius: 0.012 };
   // Furniture this file has never heard of: dress it by its material.
   if (spec.material === 'fabric') return { type: 'cloth', color: P.cloth, radius: 0.04 };
   return { type: 'wood', color: P.wood, radius: 0.01 };
 }
 
-const spec = (id) => STATIC_BOXES.find((s) => s.id === id);
 const shadowed = (mesh, cast = true) => {
   mesh.castShadow = cast;
   mesh.receiveShadow = true;
   return mesh;
 };
+
+// Soft shadows under each kind of piece: which of its boxes, and how far past them.
+const UNDER = [
+  ['bed', ['bedPlatform'], 0.5], ['nightstand', ['nightstand']], ['desk', ['deskTop'], 0.3], ['bookshelf', ['bookshelfPanel0']],
+  ['couch', ['couchBack', 'couchSeat', 'couchArmNorth', 'couchArmSouth'], 0.4], ['coffeeTable', ['coffeeTableTop'], 0.3],
+  ['aquarium', ['aquariumCabinet']], ['chair', ['chairBase'], 0.25], ['catTree', ['catTreeBase']],
+  ['diningTable', ['diningTableTop'], 0.35], ['armchair', ['armchairSeat', 'armchairBack', 'armchairArmL', 'armchairArmR'], 0.3],
+  ['cardboardBox', ['boxTop'], 0.22], ['boxStack', ['boxStackLow'], 0.25], ['wardrobe', ['wardrobeBody'], 0.3],
+];
 
 /**
  * Fold every still, opaque mesh under `root` into one mesh per material. The
@@ -88,22 +116,33 @@ function mergeStatic(root) {
   }
 }
 
+let originalPieces = null;
+
 /**
- * @param {{maxAnisotropy?: number}} [opts]
+ * @param {object} [opts]
+ * @param {number} [opts.maxAnisotropy]
+ * @param {object} [opts.level]  a loadLevel() result (src/levels); left out, the original room
+ * @param {ReturnType<typeof createMaterials>} [opts.materials]  another room's materials, to
+ *   share them (and the props' look, which uses them) when the level changes
  * @returns {{group: THREE.Group, materials: object, update: (t: number) => void, setNight: (night: boolean) => void}}
  */
 export function buildRoom(opts = {}) {
-  const mats = createMaterials(opts.maxAnisotropy);
+  const mats = opts.materials ?? createMaterials(opts.maxAnisotropy);
+  const level = opts.level ?? null;
+  const pieces = level?.pieces ?? (originalPieces ??= compileLevel(ORIGINAL).pieces);
+  const original = !level || level.legacy;
   const group = new THREE.Group();
   // What the furniture builders share: materials, per-frame callbacks, and lights that follow the mood.
   const ctx = { mats, animate: [], lights: [] };
   const P = PALETTE;
-  const add = (mesh, cast = true) => group.add(shadowed(mesh, cast));
+  const add = (mesh, cast = true, parent = group) => parent.add(shadowed(mesh, cast));
   const W = ROOM.maxX - ROOM.minX, D = ROOM.maxZ - ROOM.minZ;
+  const boxOf = (piece, id) => piece.item.boxes.find((b) => b.id === id);
+  const ofItem = (id) => pieces.filter((p) => p.item.id === id);
 
   // ------------------------------------------------------------ the shell
   for (const s of STATIC_BOXES) {
-    if (s.visible === false) continue;
+    if (!SHELL_IDS.includes(s.id) || s.visible === false) continue;
     const [w, h, d] = s.half.map((v) => v * 2);
     let mesh;
     if (s.id === 'floor') {
@@ -116,9 +155,7 @@ export function buildRoom(opts = {}) {
       mesh.receiveShadow = true;
       mesh.position.set(...s.center);
       group.add(mesh);
-      continue;
-    }
-    if (s.id === 'wallWest' || s.id === 'wallNorth') {
+    } else if (s.id === 'wallWest' || s.id === 'wallNorth') {
       const paint = new THREE.MeshStandardMaterial({ map: tex.plaster({ seed: s.id.length, color: P.wall }), roughness: 0.95 });
       const cut = mats.plain(P.wallCut, 0.9), back = mats.plain(0x6f6b5e, 0.95);
       // Inner face: +x for the west wall, +z for the north wall.
@@ -126,26 +163,49 @@ export function buildRoom(opts = {}) {
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), faces);
       mesh.position.set(...s.center);
       add(mesh, false);
-      continue;
     }
-    if (FURNITURE[s.id]) {
-      group.add(FURNITURE[s.id](s, ctx));
-      continue;
-    }
-    const st = styleFor(s);
-    mesh = new THREE.Mesh(roundedBox(w, h, d, st.radius), st.type === 'cloth' ? mats.cloth(st.color) : mats.wood(st.color));
-    mesh.position.set(...s.center);
-    if (s.rotY) mesh.rotation.y = s.rotY;
-    add(mesh);
   }
-  // Occluders are the bed skirt: cloth the cat walks through, hung in folds.
+
+  // ----------------------------------------------------------- the pieces
+  // Hanging cloth the cat walks through (occluders), in folds.
   const folds = tex.pleats();
   folds.repeat.set(GRAIN_TILE / 0.45, GRAIN_TILE / 0.26); // UVs are in grain tiles: a fold every ~6 cm, one drop per height
-  const skirt = new THREE.MeshStandardMaterial({ color: P.skirt, map: folds, roughness: 0.95 });
-  for (const s of OCCLUDERS) {
-    const mesh = new THREE.Mesh(roundedBox(s.half[0] * 2, s.half[1] * 2, s.half[2] * 2, 0.002), skirt);
+  const hangings = { skirt: new THREE.MeshStandardMaterial({ color: P.skirt, map: folds, roughness: 0.95 }) };
+  const hangingFor = (id) => {
+    if (id.startsWith('diningCloth')) return (hangings.cloth ??= new THREE.MeshStandardMaterial({ color: P.tablecloth, map: folds, roughness: 0.95 }));
+    if (id.startsWith('armchairSkirt')) return (hangings.armchair ??= new THREE.MeshStandardMaterial({ color: P.armchair, map: folds, roughness: 0.95 }));
+    return hangings.skirt;
+  };
+  const meshOf = (s) => {
+    const [w, h, d] = s.half.map((v) => v * 2);
+    const st = styleFor(s);
+    const mat = st.type === 'cloth' ? mats.cloth(st.color) : st.type === 'plain' ? mats.plain(st.color, 0.92) : mats.wood(st.color);
+    const mesh = new THREE.Mesh(roundedBox(w, h, d, st.radius), mat);
     mesh.position.set(...s.center);
-    add(mesh);
+    if (s.rotY) mesh.rotation.y = s.rotY;
+    return mesh;
+  };
+  // Each piece is built in its canonical place, in `inner`; `outer` moves and turns it.
+  const frames = new Map();
+  for (const piece of pieces) {
+    const { item, T } = piece;
+    const outer = new THREE.Group(), inner = new THREE.Group();
+    outer.position.set(T.to.x, 0, T.to.z);
+    outer.rotation.y = T.yaw;
+    inner.position.set(-T.from.x, 0, -T.from.z);
+    outer.add(inner);
+    group.add(outer);
+    frames.set(piece, inner);
+    for (const s of item.boxes) {
+      if (s.visible === false) continue;
+      if (FURNITURE[s.id]) inner.add(FURNITURE[s.id](s, ctx));
+      else add(meshOf(s), true, inner);
+    }
+    for (const s of item.occluders) {
+      const mesh = new THREE.Mesh(roundedBox(s.half[0] * 2, s.half[1] * 2, s.half[2] * 2, 0.002), hangingFor(s.id));
+      mesh.position.set(...s.center);
+      add(mesh, true, inner);
+    }
   }
 
   // ---------------------------------------------------------- baseboards
@@ -164,13 +224,13 @@ export function buildRoom(opts = {}) {
   const blob = decal(tex.softShadow({ strength: 0.42 }));
   const crease = decal(tex.creaseShadow({ strength: 0.4 }));
   let lift = 0.0015;
-  const flat = (w, d, x, z, mat, y) => {
+  const flat = (w, d, x, z, mat, y, parent = group) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
     m.userData.noAO = true;
     m.rotation.x = -Math.PI / 2;
     m.position.set(x, y ?? (lift += 0.0004), z);
     m.renderOrder = 2;
-    group.add(m);
+    parent.add(m);
     return m;
   };
   // Along the two walls (v = 0 is the dark edge; the plane's local +y maps to -z after the tilt).
@@ -188,23 +248,15 @@ export function buildRoom(opts = {}) {
     m.renderOrder = 2;
     group.add(m);
   }
-  // Under the furniture that stands on, or hangs low over, the floor.
-  const under = (ids, pad = 0.35) => {
-    const boxes = ids.map(spec).filter(Boolean);
+  // Under the furniture that stands on, or hangs low over, the floor (in each piece's own frame).
+  const under = (piece, ids, pad = 0.35) => {
+    const boxes = ids.map((id) => boxOf(piece, id)).filter(Boolean);
     if (!boxes.length) return;
     const minX = Math.min(...boxes.map((b) => b.center[0] - b.half[0])), maxX = Math.max(...boxes.map((b) => b.center[0] + b.half[0]));
     const minZ = Math.min(...boxes.map((b) => b.center[2] - b.half[2])), maxZ = Math.max(...boxes.map((b) => b.center[2] + b.half[2]));
-    flat(maxX - minX + pad, maxZ - minZ + pad, (minX + maxX) / 2, (minZ + maxZ) / 2, blob);
+    flat(maxX - minX + pad, maxZ - minZ + pad, (minX + maxX) / 2, (minZ + maxZ) / 2, blob, undefined, frames.get(piece));
   };
-  under(['bedPlatform'], 0.5);
-  under(['nightstand']);
-  under(['deskTop'], 0.3);
-  under(['bookshelfPanel0']);
-  under(['couchBack', 'couchSeat', 'couchArmNorth', 'couchArmSouth'], 0.4);
-  under(['coffeeTableTop'], 0.3);
-  under(['aquariumCabinet']);
-  under(['chairBase'], 0.25);
-  under(['catTreeBase']);
+  for (const [itemId, ids, pad] of UNDER) for (const piece of ofItem(itemId)) under(piece, ids, pad);
 
   // ----------------------------------------------------------------- rugs
   const rug = (texture, w, d, x, z, y) => {
@@ -216,20 +268,28 @@ export function buildRoom(opts = {}) {
     group.add(m);
     return m;
   };
-  // The big rug lies under the coffee table and runs up to the couch; the patchwork one beside it.
-  rug(tex.shagRug({ aspect: 3.4 / 2.2 }), 3.4, 2.2, -0.95, 1.85, 0.006);
-  rug(tex.patchworkRug(), 2.5, 1.7, 2.05, 1.95, 0.009);
+  if (original) {
+    // The big rug lies under the coffee table and runs up to the couch; the patchwork one beside it.
+    rug(tex.shagRug({ aspect: 3.4 / 2.2 }), 3.4, 2.2, -0.95, 1.85, 0.006);
+    rug(tex.patchworkRug(), 2.5, 1.7, 2.05, 1.95, 0.009);
+  } else {
+    // The shag rug under the coffee table (or the dining table), the patchwork one where he gets out of bed.
+    for (const r of rugSpots(level)) {
+      if (r.kind === 'shag') rug(tex.shagRug({ aspect: r.w / r.d }), r.w, r.d, r.x, r.z, 0.006);
+      else rug(tex.patchworkRug(r.alongZ ? { cols: 4, rows: 6 } : {}), r.w, r.d, r.x, r.z, 0.009);
+    }
+  }
 
   // --------------------------------------------------------------- window
-  // Above A's window sill, on the north wall.
-  const sill = spec('windowSill');
-  const windowParts = new THREE.Group();
-  let glass = null, shaft = null;
-  if (sill) {
+  // Above the window sill, in the wall behind it (the north wall where the sill stands canonically).
+  const windows = [];
+  for (const piece of ofItem('windowSill')) {
+    const sill = boxOf(piece, 'windowSill');
+    const windowParts = new THREE.Group();
     const cx = sill.center[0], wz = ROOM.minZ;
     const ww = sill.half[0] * 2 + 0.06, wh = 0.92, bottom = SURFACES.windowSillTop + 0.02;
     const frame = mats.wood(P.windowFrame, 0.55);
-    glass = new THREE.Mesh(new THREE.PlaneGeometry(ww, wh), new THREE.MeshBasicMaterial({ map: tex.windowView({ night: false }) }));
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(ww, wh), new THREE.MeshBasicMaterial({ map: tex.windowView({ night: false }) }));
     glass.position.set(cx, bottom + wh / 2, wz + 0.006);
     windowParts.add(glass);
     const bar = (w, h, x, y, depth = 0.05) => {
@@ -258,13 +318,14 @@ export function buildRoom(opts = {}) {
       cx - ww / 2, top, wz + 0.05, cx + ww / 2, top, wz + 0.05, cx + ww / 2 - 0.5, 0.01, wz + reach,
       cx - ww / 2, top, wz + 0.05, cx + ww / 2 - 0.5, 0.01, wz + reach, cx - ww / 2 - 0.9, 0.01, wz + reach - 0.3,
     ], 3));
-    shaft = new THREE.Mesh(shaftGeo, new THREE.MeshBasicMaterial({ color: 0x9db4ff, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+    const shaft = new THREE.Mesh(shaftGeo, new THREE.MeshBasicMaterial({ color: 0x9db4ff, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
     shaft.visible = false;
     shaft.userData.noAO = true;
     shaft.renderOrder = 6;
     windowParts.add(shaft);
+    frames.get(piece).add(windowParts);
+    windows.push({ glass, shaft });
   }
-  group.add(windowParts);
 
   // ------------------------------------------------------------- pictures
   // `wall` picks the wall; `along` runs along it, `y` is the centre height.
@@ -278,16 +339,21 @@ export function buildRoom(opts = {}) {
     else { g.position.set(ROOM.minX + 0.016, y, along); g.rotation.y = Math.PI / 2; }
     group.add(g);
   };
-  picture('leaves', 'north', -2.3, 1.74, 0.5, 0.64); // above the aquarium
-  picture('note', 'north', -1.5, 1.6, 0.26, 0.34);
-  picture('map', 'north', 0.35, 1.8, 0.7, 0.48);
-  picture('sun', 'west', 0.25, 1.7, 0.62, 0.52);
+  if (original) {
+    picture('leaves', 'north', -2.3, 1.74, 0.5, 0.64); // above the aquarium
+    picture('note', 'north', -1.5, 1.6, 0.26, 0.34);
+    picture('map', 'north', 0.35, 1.8, 0.7, 0.48);
+    picture('sun', 'west', 0.25, 1.7, 0.62, 0.52);
+  } else {
+    for (const p of pictureSpots(pieces)) picture(p.kind, p.wall, p.along, p.y, p.w, p.h);
+  }
 
-  // -------------------------------------------- drawers, brackets, bedding
+  // --------------------------------- drawers, brackets, bedding, the rest
   const knobMat = mats.plain(P.brass, 0.35, 0.7);
-  const drawers = (id, face, count) => {
-    const b = spec(id);
+  const drawers = (piece, id, face, count) => {
+    const b = boxOf(piece, id);
     if (!b) return;
+    const parent = frames.get(piece);
     const front = mats.wood(tex.shade(styleFor(b).color, 0.1));
     const gap = 0.03, total = b.half[1] * 2 - 0.08, each = (total - gap * (count - 1)) / count;
     for (let i = 0; i < count; i++) {
@@ -302,23 +368,23 @@ export function buildRoom(opts = {}) {
         panel.position.set(b.center[0], y, b.center[2] + b.half[2] + 0.006);
         knob.position.set(b.center[0], y, b.center[2] + b.half[2] + 0.024);
       }
-      group.add(panel, knob);
+      parent.add(panel, knob);
     }
   };
-  drawers('nightstand', 'x', 2);
-  drawers('deskPedestal', 'z', 3);
+  for (const piece of ofItem('nightstand')) drawers(piece, 'nightstand', 'x', 2);
+  for (const piece of ofItem('desk')) drawers(piece, 'deskPedestal', 'z', 3);
 
-  const ws = spec('wallShelf');
-  if (ws) {
+  for (const piece of ofItem('wallShelf')) {
+    const ws = boxOf(piece, 'wallShelf');
     for (const dz of [-0.32, 0.32]) {
       const br = shadowed(new THREE.Mesh(roundedBox(ws.half[0] * 1.6, 0.03, 0.03, 0.006), mats.wood(P.shelfBack)));
       br.position.set(ws.center[0] - ws.half[0] * 0.2, ws.center[1] - ws.half[1] - 0.015, ws.center[2] + dz);
-      group.add(br);
+      frames.get(piece).add(br);
     }
   }
 
-  const mattress = spec('bedMattress');
-  if (mattress) {
+  for (const piece of ofItem('bed')) {
+    const mattress = boxOf(piece, 'bedMattress');
     const [mx, my, mz] = mattress.center, [hx, hy, hz] = mattress.half;
     // The blanket covers the foot two thirds of the bed and hangs a little over its sides.
     const len = hx * 2 * 0.68;
@@ -331,10 +397,52 @@ export function buildRoom(opts = {}) {
     for (let k = 0; k < 2 * perSide; k++) buv.setX(k, k < perSide ? 0.995 : 0.005);
     const blanket = shadowed(new THREE.Mesh(blanketGeo, blanketMat));
     blanket.position.set(mx + hx - len / 2 + 0.02, my + hy - hy * 0.7 + 0.014, mz);
-    group.add(blanket);
     const fold = shadowed(new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.035, hz * 2 + 0.075, 3, 0.017), mats.cloth(PALETTE.sheet)));
     fold.position.set(mx + hx - len + 0.06, my + hy + 0.012, mz);
-    group.add(fold);
+    frames.get(piece).add(blanket, fold);
+  }
+
+  // The tablecloth's top, over the table top (its sides are the occluders).
+  for (const piece of ofItem('diningTable')) {
+    const t = boxOf(piece, 'diningTableTop');
+    const cloth = shadowed(new THREE.Mesh(roundedBox(t.half[0] * 2 + 0.04, 0.008, t.half[2] * 2 + 0.04, 0.003), mats.cloth(P.tablecloth)));
+    cloth.position.set(t.center[0], t.center[1] + t.half[1] - 0.003, t.center[2]);
+    frames.get(piece).add(cloth);
+  }
+
+  // Packing tape over the boxes.
+  const tape = mats.plain(P.tape, 0.45);
+  const strip = (parent, w, h, d, x, y, z) => {
+    const m = shadowed(new THREE.Mesh(roundedBox(w, h, d, 0.001), tape), false);
+    m.position.set(x, y, z);
+    parent.add(m);
+  };
+  for (const piece of ofItem('cardboardBox')) {
+    const top = boxOf(piece, 'boxTop');
+    strip(frames.get(piece), 0.06, 0.003, top.half[2] * 2, top.center[0], top.center[1] + top.half[1] + 0.0015, top.center[2]);
+  }
+  for (const piece of ofItem('boxStack')) {
+    const low = boxOf(piece, 'boxStackLow'), high = boxOf(piece, 'boxStackHigh');
+    strip(frames.get(piece), 0.06, 0.003, high.half[2] * 2, high.center[0], high.center[1] + high.half[1] + 0.0015, high.center[2]);
+    strip(frames.get(piece), 0.06, low.half[1] * 2 - 0.02, 0.003, low.center[0], low.center[1], low.center[2] + low.half[2] + 0.0015);
+  }
+
+  // The wardrobe's two doors, their knobs, and a cornice.
+  for (const piece of ofItem('wardrobe')) {
+    const b = boxOf(piece, 'wardrobeBody');
+    const parent = frames.get(piece);
+    const front = b.center[2] + b.half[2];
+    const door = mats.wood(P.wardrobeDoor);
+    for (const side of [-1, 1]) {
+      const panel = shadowed(new THREE.Mesh(roundedBox(b.half[0] - 0.03, b.half[1] * 2 - 0.14, 0.016, 0.006), door), false);
+      panel.position.set(b.center[0] + side * (b.half[0] / 2 + 0.005), b.center[1] + 0.02, front + 0.008);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.018, 14, 10), knobMat);
+      knob.position.set(b.center[0] + side * 0.05, b.center[1] + 0.05, front + 0.028);
+      parent.add(panel, knob);
+    }
+    const cornice = shadowed(new THREE.Mesh(roundedBox(b.half[0] * 2 + 0.06, 0.05, b.half[2] * 2 + 0.04, 0.01), mats.wood(tex.shade(P.wardrobe, -0.1))));
+    cornice.position.set(b.center[0], b.center[1] + b.half[1] + 0.025, b.center[2] + 0.02);
+    parent.add(cornice);
   }
 
   mergeStatic(group);
@@ -348,12 +456,12 @@ export function buildRoom(opts = {}) {
     },
     /** Swap what the window shows and whether moonlight falls in. */
     setNight(night) {
-      if (glass) {
+      for (const { glass, shaft } of windows) {
         glass.material.map.dispose();
         glass.material.map = tex.windowView({ night });
         glass.material.needsUpdate = true;
+        shaft.visible = night;
       }
-      if (shaft) shaft.visible = night;
       // The aquarium counts for more once the room is dark.
       for (const l of ctx.lights) {
         l.light.intensity = night ? 2.4 : 1.1;
