@@ -25,13 +25,17 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
-## A mouse-steered camera, now the default (Nov 23)
+## A mouse-steered camera, and the whole room with the mouse as the default (Nov 23)
 
 - **The mouse turns the camera** (`setFree` and `look` in `src/player/chaseCamera.js`). The new default view sits behind the cat like the follow camera, but stays where the mouse turns and tilts it (`CHASE.sensitivity`, `lowest`, `highest`). Clicking the game hands it the mouse (pointer lock), and Esc gives the mouse back and pauses. While the game has the mouse, a click swats as J does. When it doesn't, a prompt asks for the click.
 - **In that view the keys move the cat the way the camera looks** (`cameraRelativeInput`), as in GTA on a computer: W away from the camera, S towards it, A and D to the sides, with the cat turning to face where it goes. Shift runs in any direction.
-- **C cycles through three cameras:** the mouse (the default), the follow camera (it swings round behind the cat, and A and D turn the cat), and the whole room. The choice is kept in `loa.camera`. The old `loa.view` setting is ignored, so everyone starts with the mouse.
+- **Two settings, set separately:**
+  - **C** switches the camera: the whole room (the default), or behind the cat;
+  - **M** switches the steering: the mouse (the default), or the keys alone.
+
+  With the mouse, the whole-room view opens from the front, as on the menu. It turns round the room and tilts as the mouse moves, and W A S D move the cat up, left, down and right on the screen (`turnRoom`). With the keys alone, A and D turn the cat and the camera swings round behind it by itself; behind the cat, that is the follow camera. Both are kept, in `loa.cam` and `loa.steer`. Everyone starts in the whole room with the mouse, whatever the earlier `loa.camera` setting said.
 - **The hints and the menu's controls** match the camera in use.
-- **For D:** `window.game.chase` is the camera rig.
+- **For D:** `window.game` has `chase` (the camera rig), `steer` and `turnRoom`.
 
 ## Names, a leaderboard, and what stars unlock (Nov 23)
 
@@ -423,7 +427,12 @@ npm run test:watch  # test in watch mode
 
 Type your name on the menu, then Play. Stars unlock skins and accessories for the cat, and the harder rooms; the menu lists them.
 
-With the default camera, the **mouse** looks around (click the game first; Esc pauses and gives the mouse back), **W A S D** move the cat the way you look, and a **click** swats. Press **C** for the follow camera, where the keys below apply, or for the whole room.
+The game starts in the whole-room view, steered with the mouse:
+- the **mouse** turns the room round and tilts it (click the game first; Esc pauses and gives the mouse back);
+- **W A S D** move the cat up, left, down and right on the screen;
+- a **click** swats.
+
+**C** switches to the camera behind the cat, which the mouse turns too. **M** switches to the keys alone (below), where A and D turn the cat and the camera follows it.
 
 - **Up / W** — move the cat forward along the direction it is facing
 - **Down / S** — reverse

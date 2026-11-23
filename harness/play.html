@@ -133,7 +133,7 @@
   /* What stars unlock, the player's name (asked before playing), and the leaderboard beside the menu. */
   .card .unlocks { font-size:14px; color:#ffd59a; }
   /* The hints for the camera in use, and a prompt while the mouse is not the game's. */
-  body[data-camera="mouse"] #hint .keysOnly, body:not([data-camera="mouse"]) #hint .mouseOnly { display:none; }
+  body[data-steer="mouse"] #hint .keysOnly, body:not([data-steer="mouse"]) #hint .mouseOnly { display:none; }
   #mousePrompt { position:fixed; left:50%; bottom:78px; transform:translateX(-50%); z-index:3; display:none; pointer-events:none; font-size:16px; }
   body.mouseFree[data-screen="play"] #mousePrompt { display:flex; }
   #menu .card { gap:9px; padding:18px 34px 20px; }
@@ -200,7 +200,7 @@
   <span class="mouseOnly"><kbd>Mouse</kbd> look</span><span class="mouseOnly"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
   <span class="keysOnly"><kbd>W</kbd><kbd>S</kbd> walk</span><span class="keysOnly"><kbd>A</kbd><kbd>D</kbd> turn</span>
   <span><kbd>Shift</kbd> run</span><span><kbd>Space</kbd> jump</span><span><kbd>J</kbd><span class="mouseOnly">&nbsp;or click</span> swat</span>
-  <span><kbd>Esc</kbd> pause</span><span><kbd>C</kbd> camera</span><span><kbd>N</kbd> 3 a.m.</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span id="fps"></span>
+  <span><kbd>Esc</kbd> pause</span><span><kbd>C</kbd> camera</span><span><kbd>M</kbd> steering</span><span><kbd>N</kbd> 3 a.m.</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain</span><span id="fps"></span>
 </div>
 
 <div class="screen" id="menu">
@@ -216,7 +216,8 @@
       <span><kbd>Space</kbd></span><span>jump onto things</span>
       <span><kbd>J</kbd> / click</span><span>swat</span>
       <span><kbd>Esc</kbd></span><span>pause</span>
-      <span><kbd>C</kbd></span><span>change camera</span>
+      <span><kbd>C</kbd></span><span>behind the cat / room</span>
+      <span><kbd>M</kbd></span><span>mouse or keys only</span>
     </div>
     <div class="tiers" id="tiers" role="group" aria-label="Difficulty"></div>
     <div class="roomCard">
@@ -303,7 +304,7 @@ import { createRound } from '../src/core/round.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld } from '../src/physics/index.js';
 import { createCat, inputFromKeys, cameraRelativeInput, CAT_KEYS } from '../src/player/index.js';
-import { createChaseCamera } from '../src/player/chaseCamera.js';
+import { createChaseCamera, CHASE } from '../src/player/chaseCamera.js';
 import { createNoise } from '../src/noise/index.js';
 import { createOwner } from '../src/ai/index.js';
 import { LEVELS, loadLevel, INVENTORY } from '../src/levels/index.js';
@@ -393,6 +394,7 @@ const follow = new THREE.Vector3();   // this frame's drift
 const followed = new THREE.Vector3(); // drift so far
 function homeCamera() {
   followed.set(0, 0, 0);
+  overviewYaw = Math.atan2(HOME.offset[2], HOME.offset[0]);
   controls.target.set(...HOME.target);
   camera.position.set(HOME.target[0] + HOME.offset[0], HOME.target[1] + HOME.offset[1], HOME.target[2] + HOME.offset[2]);
   camera.zoom = HOME.zoom;
@@ -416,7 +418,7 @@ const DIORAMA = { min: controls.minAzimuthAngle, max: controls.maxAzimuthAngle }
 const OVERVIEW_TURN = 1.4; // 1 - e^(-rate dt) of the way round, each frame
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 let overviewYaw = Math.atan2(HOME.offset[2], HOME.offset[0]); // its bearing from what it looks at, across the floor
-const turning = () => view === 'overview' && document.body.dataset.screen === 'play';
+const turning = () => view === 'room' && steer === 'keys' && document.body.dataset.screen === 'play';
 /** The bearing straight behind the cat (it faces (cos h, -sin h)). */
 const behindCat = () => Math.atan2(Math.sin(cat.heading), -Math.cos(cat.heading));
 /** Put the overview at this bearing from what it looks at, as far off and as high up as it is. */
@@ -426,7 +428,21 @@ function placeOverview(yaw) {
   const r = Math.hypot(o.x, o.z);
   camera.position.set(controls.target.x + r * Math.cos(yaw), controls.target.y + o.y, controls.target.z + r * Math.sin(yaw));
 }
-/** Swing the overview straight behind the cat, if it is the view of a night being played. */
+/** The mouse turns the whole-room view round the room (right turns it right) and tilts it, within the diorama's tilt. */
+function turnRoom(dx, dy) {
+  const o = camera.position.clone().sub(controls.target);
+  const r = o.length();
+  const tilt = Math.min(controls.maxPolarAngle, Math.max(controls.minPolarAngle, Math.acos(o.y / r) - dy * CHASE.sensitivity));
+  overviewYaw += dx * CHASE.sensitivity;
+  camera.position.set(
+    controls.target.x + r * Math.sin(tilt) * Math.cos(overviewYaw),
+    controls.target.y + r * Math.cos(tilt),
+    controls.target.z + r * Math.sin(tilt) * Math.sin(overviewYaw));
+}
+/**
+ * Swing the overview straight behind the cat, if it is turning round behind it by itself (keys
+ * steering). Steered by the mouse it starts from the front, as on the menu, and the mouse turns it.
+ */
 function snapOverview() {
   if (turning() && cat) placeOverview(behindCat());
 }
@@ -441,23 +457,26 @@ let chase = null; // the rig for the current room (src/player/chaseCamera.js)
 // Which camera: 'mouse' (behind the cat, the mouse turns it and W goes where it looks: the
 // default), 'chase' (it follows the cat round; A and D turn the cat) or 'overview' (the whole
 // room). C goes through them, and the choice is kept.
-const VIEWS = ['mouse', 'chase', 'overview'];
-const VIEW_TOAST = { mouse: 'Camera: the mouse turns it', chase: 'Camera: follows the cat (A, D turn)', overview: 'Camera: the whole room' };
-let view = (() => { try { const v = JSON.parse(localStorage.getItem('loa.camera')); return VIEWS.includes(v) ? v : 'mouse'; } catch { return 'mouse'; } })();
-const chasing = () => (view === 'chase' || view === 'mouse') && document.body.dataset.screen === 'play';
-const mouseView = () => view === 'mouse' && document.body.dataset.screen === 'play';
+// Two choices, both kept: the camera, the whole room (the default) or behind the cat (C); and
+// the steering, the mouse (the camera turns with it, and the keys move the cat the way it looks;
+// the default) or the keys alone (A and D turn the cat, and the camera swings round behind it by
+// itself) (M).
+let view = ['behind', 'room'].includes(stored('loa.cam', '')) ? stored('loa.cam', '') : 'room';
+let steer = ['mouse', 'keys'].includes(stored('loa.steer', '')) ? stored('loa.steer', '') : 'mouse';
+const chasing = () => view === 'behind' && document.body.dataset.screen === 'play';
+const mouseView = () => steer === 'mouse' && document.body.dataset.screen === 'play';
 /** Draw from the camera the moment calls for, with the room closed round the chase camera. */
 function useView() {
   const on = chasing() && chase;
   pipeline.setCamera(on ? chaseCam : camera);
   controls.enabled = !on;
-  chase?.setFree(view === 'mouse');
-  document.body.dataset.camera = view;
+  chase?.setFree(steer === 'mouse');
+  document.body.dataset.steer = steer;
   if (mouseView()) grab();
   else letGo();
   // In a night, the overview goes all the way round and is not dragged round by hand;
   // on the menu it is the diorama, turned a little either way at most.
-  const free = view === 'overview' && document.body.dataset.screen !== 'menu';
+  const free = view === 'room' && document.body.dataset.screen !== 'menu';
   controls.enableRotate = !free;
   controls.minAzimuthAngle = free ? -Infinity : DIORAMA.min;
   controls.maxAzimuthAngle = free ? Infinity : DIORAMA.max;
@@ -495,7 +514,9 @@ document.addEventListener('pointerlockchange', () => {
   if (mouseView() && round.playing) { mouseLostAt = performance.now(); pause(); } // Esc took the mouse back
 });
 addEventListener('mousemove', (e) => {
-  if (document.pointerLockElement === renderer.domElement && mouseView()) chase?.look(e.movementX, e.movementY);
+  if (document.pointerLockElement !== renderer.domElement || !mouseView()) return;
+  if (view === 'behind') chase?.look(e.movementX, e.movementY);
+  else turnRoom(e.movementX, e.movementY);
 });
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (!mouseView()) return;
@@ -1015,12 +1036,18 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') play();
   if (e.code === 'KeyH') { if (chasing()) snapChase(); else { homeCamera(); snapOverview(); } }
   if (e.code === 'KeyC') {
-    view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length];
-    try { localStorage.setItem('loa.camera', JSON.stringify(view)); } catch {}
+    view = view === 'behind' ? 'room' : 'behind';
+    store('loa.cam', view);
     useView();
-    if (view === 'overview') snapOverview();
+    if (view === 'room') snapOverview();
     else snapChase();
-    toast(VIEW_TOAST[view]);
+    toast(view === 'behind' ? 'Camera: behind the cat' : 'Camera: the whole room');
+  }
+  if (e.code === 'KeyM') {
+    steer = steer === 'mouse' ? 'keys' : 'mouse';
+    store('loa.steer', steer);
+    useView(); // takes the mouse, or gives it back
+    toast(steer === 'mouse' ? 'Steering: the mouse turns the camera' : 'Steering: keys only (A, D turn the cat)');
   }
   if (e.code === 'KeyP') { pipeline.enabled = !pipeline.enabled; toast(pipeline.enabled ? 'Full lighting' : 'Plain render'); }
   if (e.code === 'KeyB') { pipeline.paint.enabled = !pipeline.paint.enabled; toast(pipeline.paint.enabled ? 'Painted' : 'Unpainted'); }
@@ -1110,7 +1137,8 @@ function frame(dt) {
   // The cat only listens to the keys while the round runs.
   // With the mouse turning the camera, the keys move the cat the way it looks; otherwise they steer it.
   cat.setInput(!playing ? { forward: 0, turn: 0, move: null, jump: false, swat: false }
-    : view === 'mouse' && chase ? cameraRelativeInput(keys, chase.forward) : inputFromKeys(keys));
+    : steer === 'keys' ? inputFromKeys(keys)
+      : cameraRelativeInput(keys, view === 'behind' && chase ? chase.forward : { x: -Math.cos(overviewYaw), z: -Math.sin(overviewYaw) }));
   document.body.classList.toggle('mouseFree', mouseView() && document.pointerLockElement !== renderer.domElement);
   // Fixed 120 Hz steps, capped; paused, nothing moves.
   if (round.state !== 'paused') {
@@ -1253,7 +1281,7 @@ window.game = {
   frame, play, toMenu, pause, resume, setNight, homeCamera, selectTier, anotherRoom, nextRound,
   players, startNight, showBoard,
   setRoom: (id) => setRoom(byId(id)),
-  chaseCam, get view() { return view; }, get overviewYaw() { return overviewYaw; }, get chase() { return chase; },
+  chaseCam, get view() { return view; }, get steer() { return steer; }, get overviewYaw() { return overviewYaw; }, get chase() { return chase; }, turnRoom,
   setLook,
   get goal() { return goal; }, get missions() { return tracker?.list(); }, get stars() { return stars(); },
   get level() { return level; }, get room() { return room; }, get tier() { return tier; }, get played() { return played; },
