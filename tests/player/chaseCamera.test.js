@@ -115,3 +115,77 @@ describe('the chase camera', () => {
     }
   });
 });
+
+describe('the free camera (turned with the mouse)', () => {
+  const settle = (cam, c, seconds = 1) => {
+    let out;
+    for (let i = 0; i < seconds * 60; i++) out = cam.update(1 / 60, c);
+    return out;
+  };
+
+  it('turns and tilts with the mouse, within limits, and stays put as the cat turns', () => {
+    const cam = camera();
+    cam.setFree(true);
+    const c = cat(0.5, 1.0, 0);
+    cam.snap(c);
+    cam.look(200, 0); // 200 px to the right: turned to the right
+    expect(cam.yaw).toBeCloseTo(-200 * CHASE.sensitivity, 6);
+    c.heading = Math.PI / 2; // the cat turns left; the camera doesn't follow it round
+    settle(cam, c, 2);
+    expect(cam.yaw).toBeCloseTo(-200 * CHASE.sensitivity, 6);
+    cam.look(0, 1e5); // far down: no further than `highest`
+    expect(cam.tilt).toBeCloseTo(CHASE.highest, 6);
+    cam.look(0, -1e5);
+    expect(cam.tilt).toBeCloseTo(CHASE.lowest, 6);
+  });
+
+  it('sits behind where it is turned and looks that way, which is what W means', () => {
+    const cam = camera();
+    cam.setFree(true);
+    const c = cat(0.5, 1.0, 0); // the cat faces east...
+    cam.snap(c);
+    cam.look(-(Math.PI / 2) / CHASE.sensitivity, 0); // ...the camera is turned a quarter left, to look north
+    const { position, target } = settle(cam, c);
+    expect(cam.forward.x).toBeCloseTo(0, 6);
+    expect(cam.forward.z).toBeCloseTo(-1, 6);
+    expect(position.z).toBeGreaterThan(1.0 + 1.0); // south of the cat
+    expect(Math.abs(position.x - 0.5)).toBeLessThan(0.05);
+    expect(target.z).toBeLessThan(1.0); // looking past it, northwards
+  });
+
+  it('follows the cat round again once it is no longer free, untilted', () => {
+    const cam = camera();
+    cam.setFree(true);
+    const c = cat(0.5, 1.0, 0);
+    cam.snap(c);
+    cam.look(300, 200);
+    cam.setFree(false);
+    expect(cam.tilt).toBeCloseTo(Math.atan2(CHASE.height - CHASE.pivotUp, CHASE.distance), 6);
+    settle(cam, c, 3);
+    expect(cam.yaw).toBeCloseTo(0, 2); // back behind the cat
+    cam.look(500, 0); // the mouse does nothing now
+    expect(cam.yaw).toBeCloseTo(0, 2);
+  });
+
+  it('never leaves the room or ends up inside furniture, however it is turned and tilted', () => {
+    const cam = camera();
+    cam.setFree(true);
+    let seed = 11;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let tried = 0, i = 0; i < 300 && tried < 3000; tried++) {
+      const c = cat(ROOM.minX + 0.2 + rand() * (ROOM.maxX - ROOM.minX - 0.4), ROOM.minZ + 0.2 + rand() * (ROOM.maxZ - ROOM.minZ - 0.4), rand() * Math.PI * 2);
+      if (cam.inside(c.body.position)) continue;
+      i++;
+      cam.snap(c);
+      cam.look((rand() - 0.5) * 3000, (rand() - 0.3) * 600);
+      const { position } = settle(cam, c, 0.5);
+      const at = `cat at ${c.body.position.x.toFixed(2)}, ${c.body.position.z.toFixed(2)}, yaw ${cam.yaw.toFixed(2)}, tilt ${cam.tilt.toFixed(2)}`;
+      expect(position.x, at).toBeGreaterThan(ROOM.minX);
+      expect(position.x, at).toBeLessThan(ROOM.maxX);
+      expect(position.z, at).toBeGreaterThan(ROOM.minZ);
+      expect(position.z, at).toBeLessThan(ROOM.maxZ);
+      expect(position.y, at).toBeLessThan(ROOM.wallHeight);
+      expect(cam.inside(position), at).toBe(false);
+    }
+  });
+});

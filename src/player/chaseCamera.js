@@ -1,6 +1,9 @@
 // The chase camera: play.html's third-person view. It sits behind the cat
 // and a little above it, and swings round behind as the cat turns, with a
-// lag, so turning feels like turning and not like the room spinning.
+// lag, so turning feels like turning and not like the room spinning. Set
+// free (setFree), it stays where the mouse turns and tilts it instead (look),
+// as in a game played with a mouse: then the keys move the cat the way the
+// camera looks (src/player/input.js cameraRelativeInput).
 //
 // It stays in the room:
 //   - its pivot (where it looks out from) starts just above the cat; a cat
@@ -34,7 +37,10 @@ export const CHASE = {
   maxLift: 0.9,    // ...from at most this much higher (a desk, a bed, a counter; not a bookcase)
   under: 0.8,      // something this little above the cat's middle: the cat is under it (a desk top is 0.74)...
   over: 0.35,      // ...and is watched from a pivot this far above the top of it
-  steepest: 0.87,  // rad (50 degrees): it never looks down more steeply than this
+  steepest: 0.87,  // rad (50 degrees): it never looks down more steeply than this (unless tilted there by hand)
+  sensitivity: 0.0025, // free: rad it turns or tilts per pixel the mouse moves
+  lowest: -0.15,   // free: rad it tilts to, from just below the pivot...
+  highest: 1.1,    // ...to well above it, looking down (63 degrees)
 };
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -78,7 +84,10 @@ export function createChaseCamera({ boxes, room, options = {} }) {
     z: Math.min(room.maxZ - 0.1, Math.max(room.minZ + 0.1, p.z)),
   });
 
-  let yaw = 0, ready = false;
+  // Where it sits round the pivot: this far off, tilted up this much (just as `distance` back and
+  // `height` up put it), turned to `yaw`. Free, the mouse turns and tilts it.
+  const R = Math.hypot(c.distance, c.height - c.pivotUp), TILT = Math.atan2(c.height - c.pivotUp, c.distance);
+  let yaw = 0, tilt = TILT, free = false, ready = false;
   let position = { x: 0, y: 0, z: 0 }, target = { x: 0, y: 0, z: 0 };
 
   /** Where it would be, for the cat as it is and the yaw so far: { camera, target, blocked }. */
@@ -106,7 +115,8 @@ export function createChaseCamera({ boxes, room, options = {} }) {
     for (let lift = 0; lift <= c.maxLift + 1e-9; lift += 0.15) {
       const pivot = { x: base.x, y: base.y + lift, z: base.z };
       if (lift > 0 && pivot.y > room.wallHeight - 0.3) break;
-      const want = { x: pivot.x + back.x * c.distance, y: pivot.y + (c.height - c.pivotUp), z: pivot.z + back.z * c.distance };
+      const out = R * Math.cos(tilt);
+      const want = { x: pivot.x + back.x * out, y: pivot.y + R * Math.sin(tilt), z: pivot.z + back.z * out };
       const d = { x: want.x - pivot.x, y: want.y - pivot.y, z: want.z - pivot.z };
       const len = Math.hypot(d.x, d.y, d.z);
       const dir = { x: d.x / len, y: d.y / len, z: d.z / len };
@@ -119,14 +129,16 @@ export function createChaseCamera({ boxes, room, options = {} }) {
     const { pivot, dir, reach } = best;
     let camera = clampInRoom({ x: pivot.x + dir.x * reach, y: pivot.y + dir.y * reach, z: pivot.z + dir.z * reach });
     for (let i = 0; i < 25 && inside(camera); i++) camera.y += 0.1; // never inside furniture
-    // It looks a little ahead of the cat; less far ahead once it has come in close, so the cat
-    // stays in view, but never so steeply down that the room turns into a map.
-    const fx = Math.cos(h), fz = -Math.sin(h); // the cat's facing
+    // It looks a little ahead of the cat (the way the cat faces, or free, the way it looks itself);
+    // less far ahead once it has come in close, so the cat stays in view, but never so steeply down
+    // that the room turns into a map (free, no more steeply than it is tilted).
+    const way = free ? yaw : h;
+    const fx = Math.cos(way), fz = -Math.sin(way);
     const qx = p.x - camera.x, qz = p.z - camera.z; // the camera to the cat, across the floor
     const lookY = p.y + c.lookUp;
     // Looking no more steeply than `steepest` needs the target this far off across the floor;
     // `least` is how far ahead of the cat that is (where |q + f * ahead| = need).
-    const need = Math.max(0, camera.y - lookY) / Math.tan(c.steepest);
+    const need = Math.max(0, camera.y - lookY) / Math.tan(free ? Math.max(c.steepest, tilt) : c.steepest);
     const fq = fx * qx + fz * qz, room2 = fq * fq - (qx * qx + qz * qz) + need * need;
     const least = room2 > 0 ? -fq + Math.sqrt(room2) : 0;
     const ahead = Math.max(c.lookAhead * Math.min(1, Math.hypot(qx, qz) / c.distance), least);
@@ -138,19 +150,20 @@ export function createChaseCamera({ boxes, room, options = {} }) {
     /** Straight behind the cat, no lag: at the start of a night, or on H. */
     snap(cat) {
       yaw = cat.heading;
+      tilt = TILT;
       const a = aim(cat);
       position = a.camera;
       target = a.target;
       ready = true;
       return { position: { ...position }, target: { ...target } };
     },
-    /** One frame: swing round behind the cat and follow it, with a lag. */
+    /** One frame: swing round behind the cat (unless free) and follow it, with a lag. */
     update(dt, cat) {
       if (!ready) return this.snap(cat);
-      yaw += wrap(cat.heading - yaw) * (1 - Math.exp(-c.yawRate * dt));
-      yaw = wrap(yaw);
+      if (!free) yaw = wrap(yaw + wrap(cat.heading - yaw) * (1 - Math.exp(-c.yawRate * dt)));
       const a = aim(cat);
-      const k = 1 - Math.exp(-c.followRate * dt);
+      // Free, it keeps up closely: the mouse turning it should feel direct.
+      const k = 1 - Math.exp(-c.followRate * (free ? 3 : 1) * dt);
       // Pulled in by a wall it moves at once, so it never shows the inside of one.
       if (a.blocked) position = a.camera;
       else position = { x: position.x + (a.camera.x - position.x) * k, y: position.y + (a.camera.y - position.y) * k, z: position.z + (a.camera.z - position.z) * k };
@@ -158,7 +171,22 @@ export function createChaseCamera({ boxes, room, options = {} }) {
       target = { x: target.x + (a.target.x - target.x) * kt, y: target.y + (a.target.y - target.y) * kt, z: target.z + (a.target.z - target.z) * kt };
       return { position: { ...position }, target: { ...target } };
     },
+    /** Free (the mouse turns and tilts it) or following the cat round (car-style keys). */
+    setFree(on) {
+      free = Boolean(on);
+      if (!free) tilt = TILT;
+    },
+    /** The mouse moved this many pixels (right, down): turn and tilt the free camera. */
+    look(dx, dy) {
+      if (!free) return;
+      yaw = wrap(yaw - dx * c.sensitivity);
+      tilt = Math.min(c.highest, Math.max(c.lowest, tilt + dy * c.sensitivity));
+    },
     get yaw() { return yaw; },
+    get tilt() { return tilt; },
+    get free() { return free; },
+    /** The way it looks, across the floor ({x, z}): what W means when it is free. */
+    get forward() { return { x: Math.cos(yaw), z: -Math.sin(yaw) }; },
     /** For the tests: is a point inside the room's furniture or walls? */
     inside,
   };

@@ -25,6 +25,14 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## A mouse-steered camera, now the default (Nov 23)
+
+- **The mouse turns the camera** (`setFree` and `look` in `src/player/chaseCamera.js`). The new default view sits behind the cat like the follow camera, but stays where the mouse turns and tilts it (`CHASE.sensitivity`, `lowest`, `highest`). Clicking the game hands it the mouse (pointer lock), and Esc gives the mouse back and pauses. While the game has the mouse, a click swats as J does. When it doesn't, a prompt asks for the click.
+- **In that view the keys move the cat the way the camera looks** (`cameraRelativeInput`), as in GTA on a computer: W away from the camera, S towards it, A and D to the sides, with the cat turning to face where it goes. Shift runs in any direction.
+- **C cycles through three cameras:** the mouse (the default), the follow camera (it swings round behind the cat, and A and D turn the cat), and the whole room. The choice is kept in `loa.camera`. The old `loa.view` setting is ignored, so everyone starts with the mouse.
+- **The hints and the menu's controls** match the camera in use.
+- **For D:** `window.game.chase` is the camera rig.
+
 ## Names, a leaderboard, and what stars unlock (Nov 23)
 
 - **A name before playing** (`src/core/players.js`). The menu asks for a name, and Play waits for one. Each name has its own stars, and so its own unlocked rooms, skins and accessories. The stars won before there were names go to the first name typed in. Keys typed in the name box don't reach the game, except Enter, which starts the night.
@@ -414,6 +422,8 @@ npm run test:watch  # test in watch mode
 ## How to play
 
 Type your name on the menu, then Play. Stars unlock skins and accessories for the cat, and the harder rooms; the menu lists them.
+
+With the default camera, the **mouse** looks around (click the game first; Esc pauses and gives the mouse back), **W A S D** move the cat the way you look, and a **click** swats. Press **C** for the follow camera, where the keys below apply, or for the whole room.
 
 - **Up / W** — move the cat forward along the direction it is facing
 - **Down / S** — reverse

@@ -132,7 +132,13 @@
   #endTitle.won { color:#ffe08a; }
   /* What stars unlock, the player's name (asked before playing), and the leaderboard beside the menu. */
   .card .unlocks { font-size:14px; color:#ffd59a; }
+  /* The hints for the camera in use, and a prompt while the mouse is not the game's. */
+  body[data-camera="mouse"] #hint .keysOnly, body:not([data-camera="mouse"]) #hint .mouseOnly { display:none; }
+  #mousePrompt { position:fixed; left:50%; bottom:78px; transform:translateX(-50%); z-index:3; display:none; pointer-events:none; font-size:16px; }
+  body.mouseFree[data-screen="play"] #mousePrompt { display:flex; }
   #menu .card { gap:9px; padding:18px 34px 20px; }
+  #menu .card > p:not(.tag):not(.unlocks):not(.best) { font-size:15px; }
+  #menu .card .keys { gap:4px 12px; }
   #menu .card h1 { font-size:40px; }
   .card .player { align-items:center; }
   .card .player label { font-size:15px; font-weight:700; }
@@ -189,8 +195,11 @@
 <div id="toast" class="plaque"></div>
 <a id="debugLink" class="plaque" href="dynamics-demo.html">Debug view: colliders and proofs &rarr;</a>
 
+<div id="mousePrompt" class="plaque">Click the game to look around with the mouse</div>
 <div id="hint" class="plaque">
-  <span><kbd>W</kbd><kbd>S</kbd> walk</span><span><kbd>Shift</kbd> run</span><span><kbd>A</kbd><kbd>D</kbd> turn</span><span><kbd>Space</kbd> jump</span><span><kbd>J</kbd> swat</span>
+  <span class="mouseOnly"><kbd>Mouse</kbd> look</span><span class="mouseOnly"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
+  <span class="keysOnly"><kbd>W</kbd><kbd>S</kbd> walk</span><span class="keysOnly"><kbd>A</kbd><kbd>D</kbd> turn</span>
+  <span><kbd>Shift</kbd> run</span><span><kbd>Space</kbd> jump</span><span><kbd>J</kbd><span class="mouseOnly">&nbsp;or click</span> swat</span>
   <span><kbd>Esc</kbd> pause</span><span><kbd>C</kbd> camera</span><span><kbd>N</kbd> 3 a.m.</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span id="fps"></span>
 </div>
 
@@ -201,13 +210,13 @@
     <p>Wreck the room before dawn, but every crash wakes him a little more, and if he sees you for long, you're caught. Reach the room's chaos goal and stay free until dawn to win the night. Winning a night earns a star, and each of the room's two missions another.</p>
     <p class="unlocks" id="unlocksLine"></p>
     <div class="keys">
-      <span><kbd>W</kbd> <kbd>S</kbd></span><span>walk, back up</span>
-      <span><kbd>A</kbd> <kbd>D</kbd></span><span>turn</span>
+      <span><kbd>Mouse</kbd></span><span>look around</span>
+      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>move where you look</span>
       <span><kbd>Shift</kbd></span><span>hold to run</span>
       <span><kbd>Space</kbd></span><span>jump onto things</span>
-      <span><kbd>J</kbd></span><span>swat what's in front</span>
+      <span><kbd>J</kbd> / click</span><span>swat</span>
       <span><kbd>Esc</kbd></span><span>pause</span>
-      <span><kbd>C</kbd></span><span>behind the cat / whole room</span>
+      <span><kbd>C</kbd></span><span>change camera</span>
     </div>
     <div class="tiers" id="tiers" role="group" aria-label="Difficulty"></div>
     <div class="roomCard">
@@ -293,7 +302,7 @@ import { tuning } from '../src/core/tuning.js';
 import { createRound } from '../src/core/round.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld } from '../src/physics/index.js';
-import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
+import { createCat, inputFromKeys, cameraRelativeInput, CAT_KEYS } from '../src/player/index.js';
 import { createChaseCamera } from '../src/player/chaseCamera.js';
 import { createNoise } from '../src/noise/index.js';
 import { createOwner } from '../src/ai/index.js';
@@ -429,13 +438,23 @@ const pipeline = createPipeline(renderer, scene, camera);
 // pause and the end screen always show the overview.
 const chaseCam = new THREE.PerspectiveCamera(60, 1, 0.05, 40);
 let chase = null; // the rig for the current room (src/player/chaseCamera.js)
-let view = (() => { try { return JSON.parse(localStorage.getItem('loa.view')) === 'overview' ? 'overview' : 'chase'; } catch { return 'chase'; } })();
-const chasing = () => view === 'chase' && document.body.dataset.screen === 'play';
+// Which camera: 'mouse' (behind the cat, the mouse turns it and W goes where it looks: the
+// default), 'chase' (it follows the cat round; A and D turn the cat) or 'overview' (the whole
+// room). C goes through them, and the choice is kept.
+const VIEWS = ['mouse', 'chase', 'overview'];
+const VIEW_TOAST = { mouse: 'Camera: the mouse turns it', chase: 'Camera: follows the cat (A, D turn)', overview: 'Camera: the whole room' };
+let view = (() => { try { const v = JSON.parse(localStorage.getItem('loa.camera')); return VIEWS.includes(v) ? v : 'mouse'; } catch { return 'mouse'; } })();
+const chasing = () => (view === 'chase' || view === 'mouse') && document.body.dataset.screen === 'play';
+const mouseView = () => view === 'mouse' && document.body.dataset.screen === 'play';
 /** Draw from the camera the moment calls for, with the room closed round the chase camera. */
 function useView() {
   const on = chasing() && chase;
   pipeline.setCamera(on ? chaseCam : camera);
   controls.enabled = !on;
+  chase?.setFree(view === 'mouse');
+  document.body.dataset.camera = view;
+  if (mouseView()) grab();
+  else letGo();
   // In a night, the overview goes all the way round and is not dragged round by hand;
   // on the menu it is the diorama, turned a little either way at most.
   const free = view === 'overview' && document.body.dataset.screen !== 'menu';
@@ -457,6 +476,33 @@ function snapChase() {
   chaseCam.position.set(position.x, position.y, position.z);
   chaseCam.lookAt(target.x, target.y, target.z);
 }
+
+// ----------------------------------------------------------------- mouse
+// The default camera turns with the mouse. Clicking the game hands the mouse to it (pointer
+// lock); Esc hands it back, which pauses the night. While it is the game's, a click swats.
+let mouseLostAt = -Infinity;
+function grab() {
+  const canvas = renderer.domElement;
+  if (document.pointerLockElement === canvas) return;
+  try { canvas.requestPointerLock?.()?.catch?.(() => {}); } catch {} // refused (too soon after Esc): the next click asks again
+}
+function letGo() {
+  if (document.pointerLockElement) document.exitPointerLock?.();
+}
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement === renderer.domElement) return;
+  keys.delete('KeyJ');
+  if (mouseView() && round.playing) { mouseLostAt = performance.now(); pause(); } // Esc took the mouse back
+});
+addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement === renderer.domElement && mouseView()) chase?.look(e.movementX, e.movementY);
+});
+renderer.domElement.addEventListener('mousedown', (e) => {
+  if (!mouseView()) return;
+  if (document.pointerLockElement !== renderer.domElement) grab(); // the first click takes the mouse...
+  else if (e.button === 0) keys.add('KeyJ'); // ...after that, a click swats
+});
+addEventListener('mouseup', (e) => { if (e.button === 0) keys.delete('KeyJ'); });
 
 function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
@@ -945,7 +991,7 @@ addEventListener('keydown', (e) => {
   const screen = document.body.dataset.screen;
   if (e.code === 'Escape') {
     if (screen === 'play') pause();
-    else if (screen === 'pause') resume();
+    else if (screen === 'pause' && performance.now() - mouseLostAt > 400) resume(); // not the Esc that just freed the mouse
     return;
   }
   if (screen !== 'play') {
@@ -969,12 +1015,12 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') play();
   if (e.code === 'KeyH') { if (chasing()) snapChase(); else { homeCamera(); snapOverview(); } }
   if (e.code === 'KeyC') {
-    view = view === 'chase' ? 'overview' : 'chase';
-    try { localStorage.setItem('loa.view', JSON.stringify(view)); } catch {}
+    view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length];
+    try { localStorage.setItem('loa.camera', JSON.stringify(view)); } catch {}
     useView();
-    if (view === 'chase') snapChase();
-    else snapOverview();
-    toast(view === 'chase' ? 'Camera: behind the cat' : 'Camera: the whole room');
+    if (view === 'overview') snapOverview();
+    else snapChase();
+    toast(VIEW_TOAST[view]);
   }
   if (e.code === 'KeyP') { pipeline.enabled = !pipeline.enabled; toast(pipeline.enabled ? 'Full lighting' : 'Plain render'); }
   if (e.code === 'KeyB') { pipeline.paint.enabled = !pipeline.paint.enabled; toast(pipeline.paint.enabled ? 'Painted' : 'Unpainted'); }
@@ -1062,7 +1108,10 @@ let acc = 0, sceneTime = 0;
 function frame(dt) {
   const playing = round.state === 'playing';
   // The cat only listens to the keys while the round runs.
-  cat.setInput(playing ? inputFromKeys(keys) : { forward: 0, turn: 0, move: null, jump: false, swat: false });
+  // With the mouse turning the camera, the keys move the cat the way it looks; otherwise they steer it.
+  cat.setInput(!playing ? { forward: 0, turn: 0, move: null, jump: false, swat: false }
+    : view === 'mouse' && chase ? cameraRelativeInput(keys, chase.forward) : inputFromKeys(keys));
+  document.body.classList.toggle('mouseFree', mouseView() && document.pointerLockElement !== renderer.domElement);
   // Fixed 120 Hz steps, capped; paused, nothing moves.
   if (round.state !== 'paused') {
     acc += dt;
@@ -1204,7 +1253,7 @@ window.game = {
   frame, play, toMenu, pause, resume, setNight, homeCamera, selectTier, anotherRoom, nextRound,
   players, startNight, showBoard,
   setRoom: (id) => setRoom(byId(id)),
-  chaseCam, get view() { return view; }, get overviewYaw() { return overviewYaw; },
+  chaseCam, get view() { return view; }, get overviewYaw() { return overviewYaw; }, get chase() { return chase; },
   setLook,
   get goal() { return goal; }, get missions() { return tracker?.list(); }, get stars() { return stars(); },
   get level() { return level; }, get room() { return room; }, get tier() { return tier; }, get played() { return played; },
