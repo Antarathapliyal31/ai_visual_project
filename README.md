@@ -25,6 +25,12 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## The whole-room view turns with the cat (Nov 23)
+
+- **It stays behind the cat** (`harness/play.html`). During a night, the whole-room view (C) swings round the room to stay behind the cat, as the chase camera does but more slowly (`OVERVIEW_TURN`), so W always sends the cat up the screen. H puts it straight behind the cat. It isn't dragged round by hand during a night; scroll still zooms. The menu shows the diorama from the south-east as before.
+- **The walls nearest the camera are left out as it turns** (`look/room.js`). Each of the four walls is its own group, with its baseboard, its crease, its pictures and its window; the window goes with whichever wall its sill stands against. `room.setWalls({ from })` hides the walls between the camera and the room, while edge-on walls still stand. The ceiling is only for the chase view: `setWalls({ ceiling: true })` puts up all four walls and the ceiling. Without a call the room looks as it always has (north and west walls). Each wall's parts are merged within it, so the draw calls stay about the same.
+- **For D:** `room.setClosed(on)` is replaced by `room.setWalls({ from, ceiling })`, and `window.game` has `overviewYaw`.
+
 ## The owner gets back to bed sooner, and a faster run (Nov 23)
 
 After one crash, with the cat hidden, he is now back in bed 13 s after the crash (was 20) and asleep at 17 s (was 24). Seen and then lost under the bed, he is back in bed about 10 s later.
@@ -398,9 +404,9 @@ npm run test:watch  # test in watch mode
 - **Right / D** — turn right
 - **Shift** (held) — run
 - **Space** — jump
-- **C** — camera: behind the cat, or the whole room
+- **C** — camera: behind the cat, or the whole room (which turns to stay behind the cat too)
 - **H** — camera back behind the cat (in the whole-room view, re-centres it)
-- **Right-drag** the view — orbit camera (whole-room view)
+- **Right-drag** the view — orbit camera (the menu's whole-room view; during a night it turns by itself)
 - **Scroll** — zoom (whole-room view)
 - Objects fall only when the cat physically collides with them
 

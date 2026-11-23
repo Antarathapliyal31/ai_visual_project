@@ -1,7 +1,10 @@
 // The room, drawn from a level's pieces (src/levels).
 //
-// The shell (the floor, the two walls the camera sees, baseboards and the
-// creases where they meet) is the same in every level. Each piece of
+// The shell (the floor, four walls, baseboards and the creases where they
+// meet) is the same in every level. Each wall is its own group, with what
+// hangs on it (pictures, the window), so a view can leave out the walls
+// between the camera and the room (setWalls); by default the north and west
+// walls stand, as the overview from the south-east has always seen them. Each piece of
 // furniture is drawn where it stands in the original room, from its
 // canonical boxes in the inventory, inside a group that moves and turns it
 // to where the level puts it: the same transform (piece.T) that placed its
@@ -118,6 +121,9 @@ function mergeStatic(root) {
 
 let originalPieces = null;
 
+/** Which way each wall faces, into the room. */
+const INWARD = { north: { x: 0, z: 1 }, south: { x: 0, z: -1 }, west: { x: 1, z: 0 }, east: { x: -1, z: 0 } };
+
 /**
  * @param {object} [opts]
  * @param {number} [opts.maxAnisotropy]
@@ -139,6 +145,15 @@ export function buildRoom(opts = {}) {
   const W = ROOM.maxX - ROOM.minX, D = ROOM.maxZ - ROOM.minZ;
   const boxOf = (piece, id) => piece.item.boxes.find((b) => b.id === id);
   const ofItem = (id) => pieces.filter((p) => p.item.id === id);
+
+  // ------------------------------------------------------------ the walls
+  // One group per wall, kept out of mergeStatic so it can be hidden.
+  const sides = {};
+  for (const side of ['north', 'west', 'east', 'south']) {
+    sides[side] = new THREE.Group();
+    sides[side].userData.dynamic = true;
+    group.add(sides[side]);
+  }
 
   // ------------------------------------------------------------ the shell
   for (const s of STATIC_BOXES) {
@@ -162,7 +177,7 @@ export function buildRoom(opts = {}) {
       const faces = s.id === 'wallWest' ? [paint, back, cut, back, cut, cut] : [cut, cut, cut, back, paint, back];
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), faces);
       mesh.position.set(...s.center);
-      add(mesh, false);
+      add(mesh, false, sides[s.id === 'wallWest' ? 'west' : 'north']);
     }
   }
 
@@ -214,8 +229,8 @@ export function buildRoom(opts = {}) {
   bbW.position.set(ROOM.minX + 0.0125, 0.05, (ROOM.minZ + ROOM.maxZ) / 2);
   const bbN = new THREE.Mesh(roundedBox(W, 0.1, 0.025, 0.006), base);
   bbN.position.set((ROOM.minX + ROOM.maxX) / 2, 0.05, ROOM.minZ + 0.0125);
-  add(bbW, false);
-  add(bbN, false);
+  add(bbW, false, sides.west);
+  add(bbN, false, sides.north);
 
   // ------------------------------------------- contact and crease shadows
   // Laid over whatever is underneath: the soft darkening where things meet,
@@ -233,11 +248,11 @@ export function buildRoom(opts = {}) {
     parent.add(m);
     return m;
   };
-  // Along the two walls (v = 0 is the dark edge; the plane's local +y maps to -z after the tilt).
-  const cn = flat(W, 0.7, 0, ROOM.minZ + 0.35, crease);
-  cn.rotation.z = Math.PI; // dark edge against the north wall
-  const cw = flat(D, 0.7, ROOM.minX + 0.35, 0, crease);
-  cw.rotation.z = -Math.PI / 2; // dark edge against the west wall
+  // Along each wall (v = 0 is the dark edge; the plane's local +y maps to -z after the tilt).
+  flat(W, 0.7, 0, ROOM.minZ + 0.35, crease, undefined, sides.north).rotation.z = Math.PI; // dark edge to the north
+  flat(D, 0.7, ROOM.minX + 0.35, 0, crease, undefined, sides.west).rotation.z = -Math.PI / 2; // to the west
+  flat(D, 0.7, ROOM.maxX - 0.35, 0, crease, undefined, sides.east).rotation.z = Math.PI / 2; // to the east
+  flat(W, 0.7, 0, ROOM.maxZ - 0.35, crease, undefined, sides.south); // to the south
   // Up the corner where the two walls meet.
   for (const west of [true, false]) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.wallHeight, 0.55), crease);
@@ -246,7 +261,7 @@ export function buildRoom(opts = {}) {
     else m.position.set(ROOM.minX + 0.275, ROOM.wallHeight / 2, ROOM.minZ + 0.002);
     m.userData.noAO = true;
     m.renderOrder = 2;
-    group.add(m);
+    sides[west ? 'west' : 'north'].add(m);
   }
   // Under the furniture that stands on, or hangs low over, the floor (in each piece's own frame).
   const under = (piece, ids, pad = 0.35) => {
@@ -324,7 +339,7 @@ export function buildRoom(opts = {}) {
     shaft.renderOrder = 6;
     windowParts.add(shaft);
     frames.get(piece).add(windowParts);
-    windows.push({ glass, shaft });
+    windows.push({ glass, shaft, parts: windowParts, at: new THREE.Vector3(cx, bottom, wz) });
   }
 
   // ------------------------------------------------------------- pictures
@@ -337,7 +352,7 @@ export function buildRoom(opts = {}) {
     g.add(art);
     if (wall === 'north') g.position.set(along, y, ROOM.minZ + 0.016);
     else { g.position.set(ROOM.minX + 0.016, y, along); g.rotation.y = Math.PI / 2; }
-    group.add(g);
+    sides[wall].add(g);
   };
   if (original) {
     picture('leaves', 'north', -2.3, 1.74, 0.5, 0.64); // above the aquarium
@@ -445,17 +460,27 @@ export function buildRoom(opts = {}) {
     parent.add(cornice);
   }
 
-  mergeStatic(group);
+  // The window goes with the wall it is in: whichever one the sill stands against.
+  group.updateMatrixWorld(true);
+  for (const w of windows) {
+    const p = w.at.clone().applyMatrix4(w.parts.parent.matrixWorld);
+    const gap = { north: p.z - ROOM.minZ, south: ROOM.maxZ - p.z, west: p.x - ROOM.minX, east: ROOM.maxX - p.x };
+    sides[Object.keys(gap).reduce((a, b) => (gap[a] <= gap[b] ? a : b))].attach(w.parts);
+  }
 
-  // ------------------------------------------- the closed room (chase view)
-  // The overview looks in from the south-east, through two missing walls and
-  // no ceiling. From behind the cat the camera looks every way, so in that
-  // view the room is closed: the east and south walls where the invisible
-  // boundaries stand, their baseboards, and a ceiling. They cast no shadows,
-  // so the light comes in as it does in the overview.
-  const closed = new THREE.Group();
-  closed.userData.dynamic = true;
-  closed.visible = false;
+  mergeStatic(group); // everything but the walls...
+  for (const g of Object.values(sides)) { // ...and each wall's own still parts, within it
+    g.userData.dynamic = false;
+    mergeStatic(g);
+    g.userData.dynamic = true;
+  }
+
+  // ------------------------------------- the east and south walls, the roof
+  // The overview from the south-east looks in where these two walls would be,
+  // so they are hidden until a view wants them (setWalls): the chase camera,
+  // which looks every way and has a ceiling over it too, or the overview
+  // turned round to another side. They stand where the invisible boundaries
+  // do, and cast no shadows, so the light comes in as it always has.
   for (const id of ['boundaryEast', 'boundarySouth']) {
     const s = STATIC_BOXES.find((b) => b.id === id);
     const [w, h, d] = s.half.map((v) => v * 2);
@@ -466,22 +491,40 @@ export function buildRoom(opts = {}) {
     const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), faces);
     wall.position.set(...s.center);
     wall.receiveShadow = true;
-    closed.add(wall);
+    sides[id === 'boundaryEast' ? 'east' : 'south'].add(wall);
   }
   const bbE = new THREE.Mesh(roundedBox(0.025, 0.1, D, 0.006), base);
   bbE.position.set(ROOM.maxX - 0.0125, 0.05, (ROOM.minZ + ROOM.maxZ) / 2);
   const bbS = new THREE.Mesh(roundedBox(W, 0.1, 0.025, 0.006), base);
   bbS.position.set((ROOM.minX + ROOM.maxX) / 2, 0.05, ROOM.maxZ - 0.0125);
-  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(W + 0.4, 0.06, D + 0.4), mats.plain(0xd9d2c1, 0.95));
-  ceiling.position.set((ROOM.minX + ROOM.maxX) / 2, ROOM.wallHeight + 0.03, (ROOM.minZ + ROOM.maxZ) / 2);
-  for (const m of [bbE, bbS, ceiling]) { m.receiveShadow = true; closed.add(m); }
-  group.add(closed);
+  bbE.receiveShadow = bbS.receiveShadow = true;
+  sides.east.add(bbE);
+  sides.south.add(bbS);
+  sides.east.visible = sides.south.visible = false;
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 0.4, 0.06, D + 0.4), mats.plain(0xd9d2c1, 0.95));
+  roof.position.set((ROOM.minX + ROOM.maxX) / 2, ROOM.wallHeight + 0.03, (ROOM.minZ + ROOM.maxZ) / 2);
+  roof.receiveShadow = true;
+  roof.userData.dynamic = true;
+  roof.visible = false;
+  group.add(roof);
 
   return {
     group,
     materials: mats,
-    /** Close the room (the chase view) or open it to the overview. */
-    setClosed(on) { closed.visible = on; },
+    /**
+     * Which walls stand. Given `from`, the camera's direction from the room
+     * across the floor ({x, z}, any length), the walls between it and the room
+     * are left out, as the overview needs; without it all four stand, as round
+     * the chase camera. `ceiling` puts the ceiling on (the chase view).
+     */
+    setWalls({ from = null, ceiling = false } = {}) {
+      const len = from ? Math.hypot(from.x, from.z) || 1 : 1;
+      for (const [side, g] of Object.entries(sides)) {
+        const n = INWARD[side];
+        g.visible = !from || (n.x * from.x + n.z * from.z) / len > -0.2; // edge-on still stands
+      }
+      roof.visible = ceiling;
+    },
     /** Move what moves by itself (the fish). `t` in seconds. */
     update(t) {
       for (const fn of ctx.animate) fn(t);

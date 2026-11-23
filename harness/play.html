@@ -360,6 +360,29 @@ controls.minAzimuthAngle = Math.PI / 4 - 0.5;
 controls.maxAzimuthAngle = Math.PI / 4 + 0.5;
 controls.minPolarAngle = 0.7;
 controls.maxPolarAngle = 1.12;
+const DIORAMA = { min: controls.minAzimuthAngle, max: controls.maxAzimuthAngle };
+
+// During a night the overview turns round the room to stay behind the cat, as
+// the chase camera does but more slowly (the whole room turns), and leaves out
+// the walls it would look through (room.setWalls). The menu shows the diorama
+// from the south-east, as it always has.
+const OVERVIEW_TURN = 1.4; // 1 - e^(-rate dt) of the way round, each frame
+const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+let overviewYaw = Math.atan2(HOME.offset[2], HOME.offset[0]); // its bearing from what it looks at, across the floor
+const turning = () => view === 'overview' && document.body.dataset.screen === 'play';
+/** The bearing straight behind the cat (it faces (cos h, -sin h)). */
+const behindCat = () => Math.atan2(Math.sin(cat.heading), -Math.cos(cat.heading));
+/** Put the overview at this bearing from what it looks at, as far off and as high up as it is. */
+function placeOverview(yaw) {
+  overviewYaw = yaw;
+  const o = camera.position.clone().sub(controls.target);
+  const r = Math.hypot(o.x, o.z);
+  camera.position.set(controls.target.x + r * Math.cos(yaw), controls.target.y + o.y, controls.target.z + r * Math.sin(yaw));
+}
+/** Swing the overview straight behind the cat, if it is the view of a night being played. */
+function snapOverview() {
+  if (turning() && cat) placeOverview(behindCat());
+}
 
 const pipeline = createPipeline(renderer, scene, camera);
 
@@ -374,8 +397,20 @@ const chasing = () => view === 'chase' && document.body.dataset.screen === 'play
 function useView() {
   const on = chasing() && chase;
   pipeline.setCamera(on ? chaseCam : camera);
-  room?.setClosed(Boolean(on));
   controls.enabled = !on;
+  // In a night, the overview goes all the way round and is not dragged round by hand;
+  // on the menu it is the diorama, turned a little either way at most.
+  const free = view === 'overview' && document.body.dataset.screen !== 'menu';
+  controls.enableRotate = !free;
+  controls.minAzimuthAngle = free ? -Infinity : DIORAMA.min;
+  controls.maxAzimuthAngle = free ? Infinity : DIORAMA.max;
+  standWalls();
+}
+/** All four walls and a ceiling round the chase camera; the overview leaves out the walls between it and the room. */
+function standWalls() {
+  if (!room) return;
+  if (chasing() && chase) room.setWalls({ ceiling: true });
+  else room.setWalls({ from: { x: camera.position.x - controls.target.x, z: camera.position.z - controls.target.z } });
 }
 /** Put the chase camera straight behind the cat. */
 function snapChase() {
@@ -721,6 +756,7 @@ function play() {
   homeCamera();
   snapChase();
   show(null);
+  snapOverview();
 }
 function toMenu() {
   newWorld();
@@ -819,12 +855,13 @@ addEventListener('keydown', (e) => {
   if (CAT_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'KeyN') setNight(!night);
   if (e.code === 'KeyR') play();
-  if (e.code === 'KeyH') { if (chasing()) snapChase(); else homeCamera(); }
+  if (e.code === 'KeyH') { if (chasing()) snapChase(); else { homeCamera(); snapOverview(); } }
   if (e.code === 'KeyC') {
     view = view === 'chase' ? 'overview' : 'chase';
     try { localStorage.setItem('loa.view', JSON.stringify(view)); } catch {}
-    if (view === 'chase') snapChase();
     useView();
+    if (view === 'chase') snapChase();
+    else snapOverview();
     toast(view === 'chase' ? 'Camera: behind the cat' : 'Camera: the whole room');
   }
   if (e.code === 'KeyP') { pipeline.enabled = !pipeline.enabled; toast(pipeline.enabled ? 'Full lighting' : 'Plain render'); }
@@ -956,12 +993,15 @@ function frame(dt) {
   ownerLook.update(still, owner.state, { near: chased ? chaseCam.position : null, cat: cat.body.position });
   room.update((sceneTime += dt));
   updateRings(still);
-  // The overview drifts most of the way with the cat, so a close view never loses it.
+  // The overview turns round behind the cat while a night is played...
+  if (turning()) placeOverview(overviewYaw + wrapAngle(behindCat() - overviewYaw) * (1 - Math.exp(-OVERVIEW_TURN * dt)));
+  // ...and drifts most of the way with it, so a close view never loses it.
   follow.set(cat.body.position.x * FOLLOW, Math.max(0, cat.body.position.y - cat.dims.radius) * 0.35, cat.body.position.z * FOLLOW).sub(followed);
   follow.multiplyScalar(Math.min(1, dt * 3.5));
   camera.position.add(follow);
   controls.target.add(follow);
   followed.add(follow);
+  standWalls(); // the walls it can see past, from where it is now
   const below = cat.groundBelow();
   catShadow.visible = below.hit;
   if (below.hit) {
@@ -1048,7 +1088,7 @@ window.game = {
   round, keys, camera, controls, renderer, scene,
   frame, play, toMenu, pause, resume, setNight, homeCamera, selectTier, anotherRoom, nextRound,
   setRoom: (id) => setRoom(byId(id)),
-  chaseCam, get view() { return view; },
+  chaseCam, get view() { return view; }, get overviewYaw() { return overviewYaw; },
   setLook,
   get goal() { return goal; }, get missions() { return tracker?.list(); }, get stars() { return stars(); },
   get level() { return level; }, get room() { return room; }, get tier() { return tier; }, get played() { return played; },
