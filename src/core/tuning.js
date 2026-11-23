@@ -99,7 +99,7 @@ export const tuning = {
     radius: 0.12,            // m; collider is 2r = 24 cm tall, under the 26 cm desk gap
     bodyHalfLength: 0.10,    // m; two spheres at +-this along the heading (0 = one sphere)
     speed: 1.6,              // m/s forward (still outruns his chase, 1.3)
-    runSpeed: 3.0,           // m/s forward with Shift held
+    runSpeed: 3.0,           // m/s with Shift held (backing up, times reverseFactor: 1.8)
     reverseFactor: 0.6,      // backing up is slower
     turnRate: 1.5,           // rad/s (86 degrees a second), car-style turning; the chase camera swings round with it
     turnAccel: 6,            // rad/s^2: a turn builds up (full rate in 0.25 s), so a tap turns a few degrees, not a lurch...

@@ -56,7 +56,7 @@ const wrapAngle = (a) => {
  * @property {{x: number, z: number} | null} move  world-space direction to run in; overrides forward/turn
  * @property {boolean} jump
  * @property {boolean} swat
- * @property {boolean} [run]  held: forwards at runSpeed rather than speed
+ * @property {boolean} [run]  held: at runSpeed rather than speed (backing up too, slowed by reverseFactor as ever)
  */
 
 /**
@@ -355,7 +355,7 @@ export function createCat(physics, opts = {}) {
     state.speed = Math.hypot(v.x, v.z); // what the last step left it with, walls included
     const accel = state.grounded ? (drive !== 0 ? cfg.groundAccel : cfg.brakeAccel) : (drive !== 0 ? cfg.airAccel : 0);
     if (accel > 0) {
-      const top = input.run && drive > 0 ? cfg.runSpeed ?? cfg.speed : cfg.speed;
+      const top = input.run ? cfg.runSpeed ?? cfg.speed : cfg.speed;
       const dvx = f.x * top * drive - v.x, dvz = f.z * top * drive - v.z;
       const dv = Math.hypot(dvx, dvz);
       const k = dv > accel * dt ? (accel * dt) / dv : 1;

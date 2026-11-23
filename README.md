@@ -25,6 +25,21 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## Names, a leaderboard, and what stars unlock (Nov 23)
+
+- **A name before playing** (`src/core/players.js`). The menu asks for a name, and Play waits for one. Each name has its own stars, and so its own unlocked rooms, skins and accessories. The stars won before there were names go to the first name typed in. Keys typed in the name box don't reach the game, except Enter, which starts the night.
+- **A leaderboard** beside the menu (`src/core/board.js`) ranks players by stars, then by rooms finished (rooms with a won night). The end screen says where you stand. For now it shows the players on that computer. It goes shared and online once the free Supabase table in `docs/leaderboard.md` is set up and switched on in `harness/board-config.js`. If the table can't be reached, the game falls back to that computer's players.
+- **The menu says what stars unlock**, worked out from the same numbers that do the unlocking:
+  - skins: Ginger 3★, Grey 8★, Black 14★, Tuxedo 22★;
+  - accessories: a red collar 5★, a blue collar with a bell 12★;
+  - rooms: Medium 6★, Hard 15★.
+
+  The cat's looks on the menu are labelled Skin and Accessory.
+- **Shift speeds up backing up too:** 1.8 m/s instead of 0.96 (`runSpeed` × `reverseFactor`).
+- **For D:**
+  - progress in `play.html` is per player now: `players.current.stars` replaces `loa.stars`, which is only read once, for the first player;
+  - `window.game` has `players`, `startNight` and `showBoard`.
+
 ## The whole-room view turns with the cat (Nov 23)
 
 - **It stays behind the cat** (`harness/play.html`). During a night, the whole-room view (C) swings round the room to stay behind the cat, as the chase camera does but more slowly (`OVERVIEW_TURN`), so W always sends the cat up the screen. H puts it straight behind the cat. It isn't dragged round by hand during a night; scroll still zooms. The menu shows the diorama from the south-east as before.
@@ -398,11 +413,13 @@ npm run test:watch  # test in watch mode
 
 ## How to play
 
+Type your name on the menu, then Play. Stars unlock skins and accessories for the cat, and the harder rooms; the menu lists them.
+
 - **Up / W** — move the cat forward along the direction it is facing
 - **Down / S** — reverse
 - **Left / A** — turn left
 - **Right / D** — turn right
-- **Shift** (held) — run
+- **Shift** (held) — run, forwards or backing up
 - **Space** — jump
 - **C** — camera: behind the cat, or the whole room (which turns to stay behind the cat too)
 - **H** — camera back behind the cat (in the whole-room view, re-centres it)

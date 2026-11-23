@@ -130,6 +130,27 @@
   .card .looks button.swatch:disabled { opacity:.4; cursor:not-allowed; filter:grayscale(.5); }
   #endTitle.caught { color:#ff9a7a; }
   #endTitle.won { color:#ffe08a; }
+  /* What stars unlock, the player's name (asked before playing), and the leaderboard beside the menu. */
+  .card .unlocks { font-size:14px; color:#ffd59a; }
+  #menu .card { gap:9px; padding:18px 34px 20px; }
+  #menu .card h1 { font-size:40px; }
+  .card .player { align-items:center; }
+  .card .player label { font-size:15px; font-weight:700; }
+  .card .player input { font:inherit; font-size:17px; color:var(--ink); width:11.5em; padding:8px 12px; border-radius:9px; border:2px solid var(--gold);
+                        background:rgba(30,14,4,.45); box-shadow:inset 0 2px 4px rgba(0,0,0,.5); outline:none; }
+  .card .player input::placeholder { color:rgba(248,231,198,.5); }
+  .card .player input:focus { border-color:#ffe0a8; }
+  .card .player input.ask { border-color:var(--alert); box-shadow:0 0 12px rgba(239,90,58,.75); }
+  .card .player button:disabled { cursor:not-allowed; filter:grayscale(.5) brightness(.8); }
+  #menu .board { position:absolute; right:24px; top:50%; transform:translateY(-50%); width:240px; flex-direction:column; align-items:stretch;
+                 gap:6px; padding:14px 16px 16px; white-space:normal; }
+  #menu .board h2 { margin:0; font-size:20px; }
+  #menu .board h2 small { font-size:12px; margin-top:2px; }
+  #menu .board ol { margin:4px 0 0; padding-left:24px; font-size:14.5px; font-weight:600; line-height:1.6; }
+  #menu .board li small { display:inline; font-size:12.5px; margin:0 0 0 4px; }
+  #menu .board li.me { color:#ffe08a; }
+  #menu .board p { margin:0; font-size:13px; font-weight:600; opacity:.85; }
+  @media (max-width: 1240px) { #menu .board { position:static; transform:none; align-self:center; margin-left:14px; } }
 
   #problem { position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); z-index:5; display:none; flex-direction:column; align-items:flex-start;
              gap:10px; max-width:min(560px, 80vw); padding:18px 24px 20px; font-size:16px; font-weight:600; line-height:1.4; white-space:normal; }
@@ -177,7 +198,8 @@
   <div class="card plaque">
     <h1>Last One Awake</h1>
     <p class="tag">3 a.m. Everyone's asleep. Except you.</p>
-    <p>Wreck the room before dawn, but every crash wakes him a little more, and if he sees you for long, you're caught. Reach the room's chaos goal and stay free until dawn to win the night. Missions earn extra stars; stars open harder rooms and new looks for your cat.</p>
+    <p>Wreck the room before dawn, but every crash wakes him a little more, and if he sees you for long, you're caught. Reach the room's chaos goal and stay free until dawn to win the night. Winning a night earns a star, and each of the room's two missions another.</p>
+    <p class="unlocks" id="unlocksLine"></p>
     <div class="keys">
       <span><kbd>W</kbd> <kbd>S</kbd></span><span>walk, back up</span>
       <span><kbd>A</kbd> <kbd>D</kbd></span><span>turn</span>
@@ -197,9 +219,18 @@
       <div class="row"><button class="quiet small" id="shuffleBtn">Another room</button><button class="quiet small" id="originalBtn">The original room</button></div>
     </div>
     <div class="looks" id="looks" aria-label="Your cat"></div>
-    <div class="row"><button id="playBtn">Play</button></div>
+    <div class="row player">
+      <label for="playerName">Your name</label>
+      <input id="playerName" maxlength="16" autocomplete="nickname" spellcheck="false" placeholder="type it to play">
+      <button id="playBtn">Play</button>
+    </div>
     <p class="best"><span id="starsLine"></span> <span id="bestLine"></span></p>
   </div>
+  <aside class="board plaque" id="board" aria-label="Leaderboard">
+    <h2>Leaderboard <small id="boardWhere"></small></h2>
+    <ol id="boardList"></ol>
+    <p id="boardNote"></p>
+  </aside>
 </div>
 
 <div class="screen" id="pause" hidden>
@@ -221,6 +252,7 @@
       <span><b id="endScore">0</b>chaos</span><span><b id="endKnocked">0</b>knocked over</span><span><b id="endBroken">0</b>broken</span><span><b id="endTime">0:00</b>survived</span>
     </div>
     <p class="best" id="endBest"></p>
+    <p class="best" id="endPlayer"></p>
     <div class="row"><button id="nextBtn" hidden>Next room</button><button id="againBtn">Play again</button><button class="quiet" id="endMenuBtn">Main menu</button></div>
   </div>
 </div>
@@ -270,6 +302,9 @@ import { TIERS, tierOf, roomsIn, nextRoom } from '../src/levels/pool.js';
 import { contentsOf, goalFor, starsFor, defaultMissions, createMissionTracker, describe as describeMission } from '../src/core/missions.js';
 import { MISSIONS } from '../src/levels/missions.js';
 import { COATS, COLLARS, totalStars, tierOpen, starsToOpen, lookOpen, newlyUnlocked } from '../src/core/progress.js';
+import { createPlayers, cleanName, entryOf } from '../src/core/players.js';
+import { localBoard, sharedBoard } from '../src/core/board.js';
+import { BOARD } from './board-config.js';
 import { buildRoom } from './look/room.js';
 import { createPropLook } from './look/propMeshes.js';
 import { createCatMesh } from './look/catMesh.js';
@@ -297,8 +332,11 @@ for (const [key, field, lo, hi] of [['turn', 'turnRate', 0.5, 4], ['speed', 'spe
 // the total opens the harder rooms and the cat's looks. ?unlock=all opens everything.
 const unlockAll = new URLSearchParams(location.search).get('unlock') === 'all';
 const UNLOCK = tuning.game.unlock;
-let bestStars = stored(STARS_KEY, {});
-const stars = () => totalStars(bestStars);
+// Each name has its own stars (src/core/players.js): the player types it in on the menu
+// before playing. The stars won before there were names go to the first player.
+const players = createPlayers({ get: (k) => stored(k, null), set: store }, { legacyStars: stored(STARS_KEY, null) });
+const myStars = () => players.current?.stars ?? {};
+const stars = () => totalStars(myStars());
 const open = (t) => tierOpen(t, stars(), UNLOCK, { unlockAll });
 const pickLook = (list, key) => list.find((l) => l.id === stored(key, '') && lookOpen(l, stars(), { unlockAll })) ?? list[0];
 let coat = pickLook(COATS, COAT_KEY), collar = pickLook(COLLARS, COLLAR_KEY);
@@ -606,7 +644,7 @@ function show(screen) {
   for (const id of ['menu', 'pause', 'end']) $(id).hidden = id !== screen;
   document.body.dataset.screen = screen ?? 'play';
   useView();
-  const primary = { menu: 'playBtn', pause: 'resumeBtn', end: 'againBtn' }[screen];
+  const primary = screen === 'menu' && !cleanName($('playerName').value) ? 'playerName' : { menu: 'playBtn', pause: 'resumeBtn', end: 'againBtn' }[screen];
   if (primary) $(primary).focus();
   else document.activeElement?.blur?.();
 }
@@ -628,7 +666,7 @@ const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
 function showMenu() {
   $('tiers').replaceChildren(...TIERS.map((t) => {
     const rooms = roomsIn(t.id, LEVELS);
-    const earned = rooms.reduce((n, r) => n + (bestStars[r.id] ?? 0), 0);
+    const earned = rooms.reduce((n, r) => n + (myStars()[r.id] ?? 0), 0);
     const b = document.createElement('button');
     b.type = 'button';
     b.title = t.blurb;
@@ -647,7 +685,7 @@ function showMenu() {
   }));
   const current = byId(level.id) ?? level.spec;
   $('roomName').textContent = current.name;
-  starRow($('roomStars'), bestStars[current.id] ?? 0);
+  starRow($('roomStars'), myStars()[current.id] ?? 0);
   $('roomFacts').textContent = `difficulty ${current.difficulty ?? '?'} of 5 · ${hidingCount(current)} hiding places`;
   $('roomBlurb').textContent = current.blurb ?? '';
   $('roomGoal').textContent = `Goal: ${goal} chaos, then survive until dawn. Missions, a star each:`;
@@ -659,7 +697,7 @@ function showMenu() {
   $('roomBy').textContent = `Furniture placed by ${current.designedBy}.${MISSIONS[current.id]?.by ? ` Missions by ${MISSIONS[current.id].by}.` : ''}`;
   $('shuffleBtn').hidden = roomsIn(tier, LEVELS).length < 2;
   $('originalBtn').hidden = level.id === 'original';
-  $('starsLine').textContent = `★ ${stars()} of ${LEVELS.length * 3}${unlockAll ? ' (everything unlocked)' : ''} ·`;
+  $('starsLine').textContent = `${players.current ? `${players.current.name}: ` : ''}★ ${stars()} of ${LEVELS.length * 3}${unlockAll ? ' (everything unlocked)' : ''} ·`;
   showLooks();
 }
 /** The coats and collars: open ones to pick, locked ones with the stars they need. */
@@ -686,7 +724,7 @@ function showLooks() {
   const label = (text) => { const span = document.createElement('span'); span.textContent = text; return span; };
   const gap = document.createElement('span');
   gap.className = 'gap';
-  $('looks').replaceChildren(label('Your cat:'), ...COATS.map((c) => swatch(c, 'coat', coat)), gap, ...COLLARS.map((c) => swatch(c, 'collar', collar)));
+  $('looks').replaceChildren(label('Skin:'), ...COATS.map((c) => swatch(c, 'coat', coat)), gap, label('Accessory:'), ...COLLARS.map((c) => swatch(c, 'collar', collar)));
 }
 /** Dress the cat (if that look is open), and show it at once. */
 function setLook(kind, id) {
@@ -694,15 +732,85 @@ function setLook(kind, id) {
   const look = list.find((l) => l.id === id);
   if (!look || !lookOpen(look, stars(), { unlockAll })) return;
   if (kind === 'coat') { coat = look; store(COAT_KEY, id); } else { collar = look; store(COLLAR_KEY, id); }
-  if (catMesh) {
-    scene.remove(catMesh.group);
-    releaseLater(catMesh.group);
-    catMesh = createCatMesh(cat.dims, lookNow());
-    applyEnvironment(catMesh.group, lights.mood.env);
-    scene.add(catMesh.group);
-  }
+  redressCat();
   showLooks();
 }
+/** Draw the cat in the look it has now. */
+function redressCat() {
+  if (!catMesh) return;
+  scene.remove(catMesh.group);
+  releaseLater(catMesh.group);
+  catMesh = createCatMesh(cat.dims, lookNow());
+  applyEnvironment(catMesh.group, lights.mood.env);
+  scene.add(catMesh.group);
+}
+
+// --------------------------------------------------------------- players
+/** The name in the box, as the player now: their stars, rooms and looks. False (and the box asks) if it is empty. */
+function choosePlayer() {
+  const box = $('playerName');
+  const before = players.current?.id;
+  const p = players.choose(box.value);
+  if (!p) { box.classList.add('ask'); box.focus(); return false; }
+  box.value = p.name;
+  box.classList.remove('ask');
+  if (p.id !== before) {
+    // Someone else's stars: what is open to them, and the looks they may wear.
+    coat = pickLook(COATS, COAT_KEY);
+    collar = pickLook(COLLARS, COLLAR_KEY);
+    redressCat();
+    if (!open(tier)) selectTier('easy');
+    else showMenu();
+    submitScore().then(() => showBoard());
+  }
+  return true;
+}
+/** Play, once there is a name to play as. */
+function startNight() {
+  if (choosePlayer()) play();
+}
+const syncName = () => { $('playBtn').disabled = !cleanName($('playerName').value); };
+$('playerName').addEventListener('input', () => { $('playerName').classList.remove('ask'); syncName(); });
+$('playerName').addEventListener('change', () => { if (cleanName($('playerName').value)) choosePlayer(); });
+
+// ----------------------------------------------------------- leaderboard
+// Everyone, online, when board-config.js says where the shared table is (src/core/board.js);
+// this computer's players otherwise, or while the shared one can't be reached.
+const localScores = localBoard(players);
+const sharedScores = BOARD ? sharedBoard(BOARD) : null;
+let boardRank = null, boardAsked = 0;
+async function showBoard() {
+  const asked = ++boardAsked;
+  let list = null, where = sharedScores ? 'everyone, online' : 'on this computer', note = '';
+  if (sharedScores) {
+    try { list = await sharedScores.top(10); } catch { where = 'on this computer'; note = "The shared board can't be reached just now."; }
+  }
+  list ??= await localScores.top(10);
+  if (asked !== boardAsked) return; // a newer one is on its way
+  const me = players.current?.id;
+  boardRank = list.findIndex((e) => e.id === me) + 1 || null;
+  $('boardWhere').textContent = where;
+  $('boardList').replaceChildren(...list.map((e) => {
+    const li = document.createElement('li');
+    li.textContent = e.name;
+    const small = document.createElement('small');
+    small.textContent = `★ ${e.stars} · ${e.finished} ${e.finished === 1 ? 'room' : 'rooms'}`;
+    li.append(small);
+    if (e.id === me) li.className = 'me';
+    return li;
+  }));
+  $('boardNote').textContent = note || (list.length ? 'Most stars first, then most rooms finished.' : 'No one yet: type your name and play a night.');
+}
+/** Put the player's line on the shared board (this computer's has it already). */
+function submitScore() {
+  if (!sharedScores || !players.current) return Promise.resolve();
+  return sharedScores.submit(entryOf(players.current)).catch(() => {});
+}
+
+// What stars unlock, from the same numbers that unlock it.
+$('unlocksLine').textContent = `Stars unlock skins for your cat: ${COATS.filter((c) => c.stars).map((c) => `${c.name} (${c.stars} ★)`).join(', ')}; `
+  + `accessories: ${COLLARS.filter((c) => c.stars).map((c) => `${c.name.toLowerCase()} (${c.stars} ★)`).join(', ')}; `
+  + `and harder rooms: Medium (${UNLOCK.medium} ★) and Hard (${UNLOCK.hard} ★).`;
 /** Play this room next (and draw it). */
 function setRoom(next) {
   if (next.id !== level.id) {
@@ -783,11 +891,13 @@ function end() {
   try { localStorage.setItem(BEST_KEY, String(round.best)); } catch {}
   // Stars: one for winning the night, one per mission done; a room keeps its best.
   const got = starsFor({ won, done: tracker.done });
-  const before = stars(), prev = bestStars[level.id] ?? 0;
-  if (got > prev) {
-    bestStars = { ...bestStars, [level.id]: got };
-    store(STARS_KEY, bestStars);
-  }
+  const before = stars(), prev = myStars()[level.id] ?? 0;
+  players.record(level.id, got);
+  const mine = entryOf(players.current);
+  $('endPlayer').textContent = `${mine.name}: ★ ${mine.stars} in all, ${mine.finished} ${mine.finished === 1 ? 'room' : 'rooms'} finished.`;
+  submitScore().then(() => showBoard()).then(() => {
+    if (boardRank) $('endPlayer').textContent += ` #${boardRank} on the leaderboard.`;
+  });
   const unlocked = unlockAll ? [] : newlyUnlocked(before, stars(), UNLOCK);
   const more = roomsIn(tier, LEVELS).length > 1;
   $('nextBtn').hidden = !more;
@@ -816,7 +926,7 @@ function end() {
   // Won: on to another room. Quiet or caught: "Play again" (focused by show) to have another go.
   if (won && more) $('nextBtn').focus();
 }
-$('playBtn').onclick = play;
+$('playBtn').onclick = startNight;
 $('resumeBtn').onclick = resume;
 $('restartBtn').onclick = play;
 $('pauseMenuBtn').onclick = toMenu;
@@ -830,6 +940,8 @@ $('endMenuBtn').onclick = toMenu;
 const keys = new Set();
 addEventListener('keydown', (e) => {
   if (e.repeat) return;
+  // Typing a name: the keys are the box's (Enter still starts the night).
+  if (e.target instanceof HTMLInputElement && e.code !== 'Enter' && e.code !== 'NumpadEnter' && e.code !== 'Escape') return;
   const screen = document.body.dataset.screen;
   if (e.code === 'Escape') {
     if (screen === 'play') pause();
@@ -841,7 +953,7 @@ addEventListener('keydown', (e) => {
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
       e.preventDefault();
       const after = round.state === 'won' && !$('nextBtn').hidden ? nextRound : play;
-      ({ menu: play, pause: resume, end: after })[screen]?.();
+      ({ menu: startNight, pause: resume, end: after })[screen]?.();
     }
     // Left and right pick the difficulty on the menu.
     if (screen === 'menu' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
@@ -1041,8 +1153,11 @@ ownerLook.setHome(level.legacy ? null : level.home);
 newWorld();
 setNight(false);
 $('bestLine').textContent = bestLine();
+$('playerName').value = players.current?.name ?? ''; // who played here last, if anyone
+syncName();
 showMenu();
 show('menu');
+showBoard();
 
 // The full lighting is the expensive part. If this machine can't hold it,
 // step down: fewer pixels first (under 55 FPS, which the brush hides, e.g. a
@@ -1087,6 +1202,7 @@ window.game = {
   get physics() { return physics; }, get cat() { return cat; }, get owner() { return owner; }, get noise() { return noise; },
   round, keys, camera, controls, renderer, scene,
   frame, play, toMenu, pause, resume, setNight, homeCamera, selectTier, anotherRoom, nextRound,
+  players, startNight, showBoard,
   setRoom: (id) => setRoom(byId(id)),
   chaseCam, get view() { return view; }, get overviewYaw() { return overviewYaw; },
   setLook,

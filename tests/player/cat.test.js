@@ -103,7 +103,7 @@ describe('cat movement', () => {
     expect(cat.body.position.z).toBeCloseTo(z, 4); // no creep on a frictionless floor
   });
 
-  it('runs at runSpeed while run (Shift) is held, forwards only, and walks again when it is let go', () => {
+  it('runs at runSpeed while run (Shift) is held, backing up faster too, and walks again when it is let go', () => {
     const { cat, run } = setup({ cat: { position: [0, FLOOR_Y, 2.5] } });
     const { speed, runSpeed, groundAccel } = tuning.cat;
     expect(runSpeed).toBeGreaterThan(speed);
@@ -113,7 +113,10 @@ describe('cat movement', () => {
     cat.setInput({ forward: 1, run: false });
     run((runSpeed - speed) / groundAccel + 0.1);
     expect(cat.state.speed).toBeCloseTo(speed, 2);
-    cat.setInput({ forward: -1, run: true }); // backing up is never a run
+    cat.setInput({ forward: -1, run: true }); // backing up runs too, at the reverse factor
+    run(1);
+    expect(cat.state.speed).toBeCloseTo(runSpeed * tuning.cat.reverseFactor, 2);
+    cat.setInput({ forward: -1, run: false });
     run(1);
     expect(cat.state.speed).toBeCloseTo(speed * tuning.cat.reverseFactor, 2);
   });
