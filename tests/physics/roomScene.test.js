@@ -137,6 +137,62 @@ describe('room scene', () => {
     expect(room.all.filter((p) => p.body.sleepState !== CANNON.Body.SLEEPING)).toHaveLength(0);
   });
 
+  describe('the bookshelf, for the cat', () => {
+    const NORTH = Math.PI / 2;
+    /** The room, settled, with the cat on the floor at (x, z) facing the bookshelf. */
+    function atTheShelf(x, z) {
+      const physics = createPhysicsWorld({ tuning: freshTuning() });
+      spawnRoomScene(physics);
+      for (let i = 0; i < 240; i++) physics.step();
+      const cat = createCat(physics, { position: [x, physics.tuning.cat.radius + 0.001, z], heading: NORTH });
+      const books = physics.props.filter((p) => p.kind === 'book' && within(p.body.position, 'bookshelfPanel0'));
+      const home = new Map(books.map((b) => [b, b.body.position.clone()]));
+      const knocked = () => books.filter((b) => {
+        const up = b.body.quaternion.vmult(new CANNON.Vec3(0, 1, 0));
+        return b.body.position.distanceTo(home.get(b)) > 0.25 || up.y < 0.64;
+      }).length;
+      const run = (s, input) => { if (input) cat.setInput(input); for (let i = 0; i < s * 120; i++) physics.step(); };
+      return { physics, cat, run, knocked };
+    }
+
+    it('has room on its bottom shelf for the cat to walk into', () => {
+      const { cat, run } = atTheShelf(3.25, -2.1);
+      run(1.5, { forward: 1, turn: 0 });
+      run(0.3, { forward: 0, turn: 0 });
+      const panel = box('bookshelfPanel0');
+      expect(cat.body.position.z).toBeLessThan(panel.center[2] + panel.half[2]); // in, past the front edge
+      expect(cat.body.position.y).toBeCloseTo(panel.center[1] + panel.half[1] + cat.dims.radius, 1); // standing on the shelf
+    });
+
+    it('lets a cat inside a shelf sweep its books out of the front, on either of the two lowest shelves', () => {
+      for (const [panel, label] of [['bookshelfPanel0', 'bottom'], ['bookshelfPanel1', 'second']]) {
+        const b = box(panel), top = b.center[1] + b.half[1];
+        const physics = createPhysicsWorld({ tuning: freshTuning() });
+        spawnRoomScene(physics);
+        for (let i = 0; i < 240; i++) physics.step();
+        const r = physics.tuning.cat.radius;
+        // In the opening at the right-hand end, facing along the shelf at its row of books.
+        const cat = createCat(physics, { position: [3.3, top + r + 0.01, b.center[2] + 0.06], heading: Math.PI });
+        const books = physics.props.filter((p) => p.kind === 'book' && Math.abs(p.body.position.y - top - 0.12) < 0.1 && within(p.body.position, panel));
+        const home = new Map(books.map((p) => [p, p.body.position.clone()]));
+        const run = (s, input) => { cat.setInput(input); for (let i = 0; i < s * 120; i++) physics.step(); };
+        run(0.3, { forward: 0, turn: 0 });
+        for (let k = 0; k < 4; k++) { run(0.05, { forward: 0, turn: 0, swat: true }); run(0.4, { forward: 0, turn: 0, swat: false }); }
+        const out = books.filter((p) => p.body.position.z > b.center[2] + b.half[2] || p.body.position.distanceTo(home.get(p)) > 0.25);
+        expect(out.length, label).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    it('lets the cat knock books off the bottom shelf from the floor', () => {
+      const { cat, run, knocked } = atTheShelf(2.8, -2.3);
+      run(0.6, { forward: 1, turn: 0 }); // up to the shelf
+      run(0.2, { forward: 0, turn: 0 });
+      for (let k = 0; k < 4; k++) { run(0.05, { forward: 0, turn: 0, swat: true }); run(0.4, { forward: 0, turn: 0, swat: false }); }
+      expect(knocked()).toBeGreaterThanOrEqual(3);
+      expect(cat.state.swats).toBe(4);
+    });
+  });
+
   it('comes apart when the cat gets at it, and nothing leaves the room', () => {
     const physics = createPhysicsWorld({ tuning: freshTuning() });
     const room = spawnRoomScene(physics);

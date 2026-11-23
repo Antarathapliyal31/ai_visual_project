@@ -56,6 +56,7 @@ const wrapAngle = (a) => {
  * @property {{x: number, z: number} | null} move  world-space direction to run in; overrides forward/turn
  * @property {boolean} jump
  * @property {boolean} swat
+ * @property {boolean} [run]  held: forwards at runSpeed rather than speed
  */
 
 /**
@@ -204,7 +205,7 @@ export function createCat(physics, opts = {}) {
     candidates.sort((a, b) => a.distance - b.distance);
 
     const f = forward();
-    const direction = { x: f.x, y: sw.lift, z: f.z };
+    const push = { x: f.x, y: sw.lift, z: f.z };
     const hits = [];
     for (const c of candidates) {
       if (hits.length >= sw.maxTargets) break;
@@ -212,18 +213,54 @@ export function createCat(physics, opts = {}) {
       const to = { x: c.point.x - body.position.x, y: c.point.y - body.position.y, z: c.point.z - body.position.z };
       const dist = Math.hypot(to.x, to.y, to.z);
       if (dist > 1e-6 && raycast(body.position, to, dist, STATIC, { skip }).hit) continue;
+      const p = c.body.position, hi = c.body.aabb.upperBound;
+      // Pushed away from the cat, unless it is jammed that way: a wall or a shelf's back right
+      // behind it, or a packed row that ends at one (books along a shelf). Then the paw sends it
+      // the most open way across the floor instead: back past the cat (hooked off a shelf from
+      // in front of it) or out to one side (swept out of a shelf from inside it), catching it
+      // high so it tips over that way.
+      const way = jammed(c.body, f) ? openWay(c.body, f) : null;
+      const direction = way ? { x: way.x, y: sw.lift, z: way.z } : push;
       // Strike part-way between the centre of mass and the near edge: some spin, not a wild one.
-      const p = c.body.position;
-      const point = {
+      const point = way ? { x: p.x, y: p.y + (hi.y - p.y) * sw.hookHigh, z: p.z } : {
         x: p.x + (c.point.x - p.x) * sw.spin,
         y: p.y + (c.point.y - p.y) * sw.spin,
         z: p.z + (c.point.z - p.z) * sw.spin,
       };
-      const result = applySwat(c.body, direction, sw.speed, { point, tuning: sw });
-      hits.push({ body: c.body, point, ...result });
+      const result = applySwat(c.body, direction, way ? sw.hookSpeed : sw.speed, { point, tuning: sw });
+      hits.push({ body: c.body, point, hook: Boolean(way), ...result });
     }
     opts.onSwat?.(hits, paw);
     return hits;
+  }
+
+  /** Is `start` pressed up against something fixed the way f points: a wall, or a packed row that ends at one? */
+  function jammed(start, f) {
+    const passed = [body];
+    for (let b = start, links = 0; links < 30; links++) {
+      const lo = b.aabb.lowerBound, hi = b.aabb.upperBound;
+      const depth = (Math.abs(f.x) * (hi.x - lo.x) + Math.abs(f.z) * (hi.z - lo.z)) / 2;
+      passed.push(b);
+      const hit = raycast(b.position, { x: f.x, y: 0, z: f.z }, depth + sw.hookGap, STATIC | PROP, { skip: passed });
+      if (!hit.hit) return false;
+      if (hit.body.collisionFilterGroup & STATIC) return true;
+      b = hit.body; // another prop right behind it: is that one stuck?
+    }
+    return false;
+  }
+
+  /**
+   * The most open way across the floor from a jammed target: back past the cat, or out to a
+   * side. Only walls and furniture count: the props packed round it (the rest of a row of
+   * books) go flying with it.
+   */
+  function openWay(target, f) {
+    let best = null, room = -1;
+    for (const w of [{ x: -f.x, z: -f.z }, { x: -f.z, z: f.x }, { x: f.z, z: -f.x }]) {
+      const free = Math.min(1, raycast(target.position, { x: w.x, y: 0, z: w.z }, 1, STATIC, { skip: [target, body] }).distance);
+      if (free > room + 0.05) { best = w; room = free; } // a tie goes to the earlier way
+    }
+    return best;
   }
 
   /**
@@ -318,7 +355,8 @@ export function createCat(physics, opts = {}) {
     state.speed = Math.hypot(v.x, v.z); // what the last step left it with, walls included
     const accel = state.grounded ? (drive !== 0 ? cfg.groundAccel : cfg.brakeAccel) : (drive !== 0 ? cfg.airAccel : 0);
     if (accel > 0) {
-      const dvx = f.x * cfg.speed * drive - v.x, dvz = f.z * cfg.speed * drive - v.z;
+      const top = input.run && drive > 0 ? cfg.runSpeed ?? cfg.speed : cfg.speed;
+      const dvx = f.x * top * drive - v.x, dvz = f.z * top * drive - v.z;
       const dv = Math.hypot(dvx, dvz);
       const k = dv > accel * dt ? (accel * dt) / dv : 1;
       v.x += dvx * k;

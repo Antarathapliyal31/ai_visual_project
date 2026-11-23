@@ -103,6 +103,21 @@ describe('cat movement', () => {
     expect(cat.body.position.z).toBeCloseTo(z, 4); // no creep on a frictionless floor
   });
 
+  it('runs at runSpeed while run (Shift) is held, forwards only, and walks again when it is let go', () => {
+    const { cat, run } = setup({ cat: { position: [0, FLOOR_Y, 2.5] } });
+    const { speed, runSpeed, groundAccel } = tuning.cat;
+    expect(runSpeed).toBeGreaterThan(speed);
+    cat.setInput({ forward: 1, run: true });
+    run(runSpeed / groundAccel + 0.1);
+    expect(cat.state.speed).toBeCloseTo(runSpeed, 2);
+    cat.setInput({ forward: 1, run: false });
+    run((runSpeed - speed) / groundAccel + 0.1);
+    expect(cat.state.speed).toBeCloseTo(speed, 2);
+    cat.setInput({ forward: -1, run: true }); // backing up is never a run
+    run(1);
+    expect(cat.state.speed).toBeCloseTo(speed * tuning.cat.reverseFactor, 2);
+  });
+
   it('accelerates, it does not snap to full speed', () => {
     const { cat, physics } = setup();
     cat.setInput({ forward: 1 });
@@ -509,7 +524,8 @@ describe('cat and props', () => {
     cat.setInput({ forward: 1 });
     let maxY = 0;
     run(1, () => { maxY = Math.max(maxY, cat.body.position.y); });
-    expect(mug.body.position.z).toBeLessThan(0.5 - 0.8);   // pushed well ahead
+    expect(mug.body.position.z).toBeLessThan(0.5 - 0.5);   // pushed a good way...
+    expect(mug.body.position.z).toBeLessThan(cat.body.position.z - 0.15); // ...and still ahead of the cat
     const free = tuning.cat.speed * (1 - tuning.cat.speed / (2 * tuning.cat.groundAccel)); // how far it gets in 1 s on open floor
     expect(cat.body.position.z).toBeLessThan(1.5 - 0.85 * free); // the cat barely slowed
     expect(maxY).toBeLessThan(R + 0.02);
@@ -611,6 +627,21 @@ describe('cat swat (paw volume)', () => {
     expect(high.body.velocity.length()).toBeLessThan(0.01);
   });
 
+  it('hooks a book on a shelf out towards itself, rather than pushing it into the back of the shelf', () => {
+    // A standing book on the bookshelf's bottom shelf; the cat on the floor in front of it, facing it.
+    const panel = box('bookshelfPanel0');
+    const front = panel.center[2] + panel.half[2];
+    const s = setup({ cat: { position: [2.8, FLOOR_Y, panel.center[2] + NOSE + tuning.swat.reach], heading: NORTH } });
+    const book = s.physics.spawn('book', { base: [2.8, panel.center[1] + panel.half[1], panel.center[2] - 0.01], dims: { half: [0.025, 0.12, 0.08], mass: 0.35 } });
+    s.run(0.3);
+    const hit = s.cat.swat().find((h) => h.body === book.body);
+    expect(hit?.hook).toBe(true);
+    expect(book.body.velocity.z).toBeGreaterThan(0.5); // out towards the cat (south), not into the back
+    s.run(1.5);
+    const q = book.body.quaternion, upY = 1 - 2 * (q.x * q.x + q.z * q.z);
+    expect(book.body.position.z > front || upY < 0.64).toBe(true); // out of the shelf, or tipped over
+  });
+
   it('has a cooldown', () => {
     const { cat, run } = withMug(0.45);
     expect(cat.swat()).toHaveLength(1);
@@ -666,7 +697,7 @@ describe('cat swat (paw volume)', () => {
 
 describe('keyboard mapping', () => {
   it('maps the README controls to car-style input', () => {
-    expect(inputFromKeys(new Set())).toEqual({ forward: 0, turn: 0, move: null, jump: false, swat: false });
+    expect(inputFromKeys(new Set())).toEqual({ forward: 0, turn: 0, move: null, jump: false, swat: false, run: false });
     expect(inputFromKeys(new Set(['KeyW']))).toMatchObject({ forward: 1, turn: 0 });
     expect(inputFromKeys(new Set(['ArrowUp']))).toMatchObject({ forward: 1 });
     expect(inputFromKeys(new Set(['KeyS']))).toMatchObject({ forward: -1 });
@@ -674,7 +705,9 @@ describe('keyboard mapping', () => {
     expect(inputFromKeys(new Set(['ArrowRight']))).toMatchObject({ turn: -1 });
     expect(inputFromKeys(new Set(['KeyW', 'KeyS']))).toMatchObject({ forward: 0 });
     expect(inputFromKeys(new Set(['Space', 'KeyJ']))).toMatchObject({ jump: true, swat: true });
-    for (const code of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyJ']) {
+    expect(inputFromKeys(new Set(['KeyW', 'ShiftLeft']))).toMatchObject({ forward: 1, run: true });
+    expect(inputFromKeys(new Set(['ShiftRight']))).toMatchObject({ run: true });
+    for (const code of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyJ', 'ShiftLeft', 'ShiftRight']) {
       expect(CAT_KEYS.has(code)).toBe(true);
     }
   });

@@ -25,6 +25,25 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## Slower, Shift to run, a bookshelf the cat can raid, and an owner who faces where he looks (Nov 23)
+
+- **Slower, with Shift to run** (`tuning.cat`, `src/player/input.js`). The cat walks at 1.6 m/s (was 2.0); `groundAccel` 6.4 and `brakeAccel` 13 keep its start and stop as quick. Holding Shift runs it at 2.6 m/s (`runSpeed`), forwards only. The owner walks at 0.9 m/s (was 1.1) and chases at 1.3 (was 1.6), so the walking cat still outruns him by a quarter.
+- **He faces where he looks and walks** (`look/ownerMesh.js`). The model faces -x, but `yawFor` turned it as if it faced +z, so his body stood a quarter turn off his heading: his vision cone came out of his side, and he walked sideways. Kneeling up in bed had the same error (`BED_YAW`). Now his body and his cone agree to within a few degrees, standing, walking, chasing and sitting up. Lying down is unchanged: he sleeps on his side, which the duvet is shaped to.
+- **His legs keep pace with him.** The walk and run clips used to play at full speed whatever he was doing. Measured from the model, a planted foot slides back at about 1.65 m/s in the walk clip and 5.0 m/s in the run, so his legs went 1.5 and 3 times too fast. Now the clips play at the pace he really moves at, and a chase slower than 2.2 m/s is a brisk walk.
+- **The bookshelf has room for the cat** (`SHELF_FILL` in `physics/roomScene.js`, shared with `levels/props.js`). Its two lowest shelves are half full, leaving a 40 cm opening at the right-hand end. The cat walks into the bottom one, and jumps into the next from a run-up. With fewer books the original room has 70 props (was 78) and a chaos goal of 260 (was 280).
+- **The swat sends things the open way** (`swat()` in `src/player/cat.js`; `tuning.swat.hookGap`, `hookSpeed`, `hookHigh`). A swat pushes things away from the cat, which used to leave books on a shelf going nowhere. Now, if the target is jammed that way (a wall or a shelf's back right behind it, or a packed row of books ending at one), the paw sends it the most open way across the floor instead, catching it high so it tips over:
+  - back past the cat, hooking it off a shelf from in front;
+  - or out to a side, sweeping it out of a shelf from inside.
+
+  Three swats knock 5-7 books out from the floor, or from inside either of the two lowest shelves; a jump and a swat reaches the second shelf from the floor.
+- **He goes the short way** (`route()` in `src/ai/navigation.js`). His walks and chases follow a 15 cm grid of the open floor, pulled straight, instead of the hand-placed waypoints, which could send him off to one side or behind him to get round a table he could see over. In simulated chases he ran away from a cat he had just seen in 7 of 113; now it's 1 of 113 (a short sidestep along a wall). A spot he can't stand on, like under the desk, takes him to the floor right in front of it. `path()`, the waypoint route, is unchanged for `validate.js`, whose measures use it.
+- **For C:**
+  - `owner.js` walks by `nav.route`, falling back to `nav.path`; the route tests are in `tests/ai/owner.test.js`;
+  - `ownerMesh.js` has the facing fix.
+- **For D:**
+  - the cat's input has `run` (Shift), and `CAT_KEYS` includes both Shift keys;
+  - `contentsOf()` counts fewer books in the original room, so its goal is 260.
+
 ## The owner doesn't look under things, and calmer controls again (Nov 23)
 
 The owner shouldn't search under things for the cat, and the controls were still too sensitive. Now:
@@ -367,6 +386,7 @@ npm run test:watch  # test in watch mode
 - **Down / S** — reverse
 - **Left / A** — turn left
 - **Right / D** — turn right
+- **Shift** (held) — run
 - **Space** — jump
 - **C** — camera: behind the cat, or the whole room
 - **H** — camera back behind the cat (in the whole-room view, re-centres it)

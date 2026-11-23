@@ -98,14 +98,15 @@ export const tuning = {
     mass: 3.0,               // kg
     radius: 0.12,            // m; collider is 2r = 24 cm tall, under the 26 cm desk gap
     bodyHalfLength: 0.10,    // m; two spheres at +-this along the heading (0 = one sphere)
-    speed: 2.0,              // m/s forward (still outruns his chase, 1.6)
+    speed: 1.6,              // m/s forward (still outruns his chase, 1.3)
+    runSpeed: 2.6,           // m/s forward with Shift held
     reverseFactor: 0.6,      // backing up is slower
     turnRate: 1.5,           // rad/s (86 degrees a second), car-style turning; the chase camera swings round with it
     turnAccel: 6,            // rad/s^2: a turn builds up (full rate in 0.25 s), so a tap turns a few degrees, not a lurch...
     turnStop: 15,            // rad/s^2: ...and stops within 0.1 s of letting go, without drifting on
     moveTurnRate: 8,         // rad/s when steering by a world direction (camera-relative input)
-    groundAccel: 8,          // m/s^2 towards the target velocity on the ground (full speed in 0.25 s)
-    brakeAccel: 16,          // m/s^2 with no input on the ground: stops in an eighth of a second
+    groundAccel: 6.4,        // m/s^2 towards the target velocity on the ground (full speed in 0.25 s)
+    brakeAccel: 13,          // m/s^2 with no input on the ground: stops in an eighth of a second
     airAccel: 8,             // m/s^2 of air control
     jumpHeight: 1.1,         // m apex; the desk top is at 0.94
     coyoteTime: 0.08,        // s after leaving a ledge when a jump still counts
@@ -129,6 +130,10 @@ export const tuning = {
     maxTargets: 3,           // nearest bodies hit by one swat
     spin: 0.2,               // 0..1, how far off-centre the paw strikes (0 = no spin)
     maxSpin: 20,             // rad/s cap on a swatted body's spin
+    hookGap: 0.1,            // m; a wall or a shelf's back (or a packed row up to one) this close behind a target:
+                             // it is jammed, and the paw sends it the most open way instead (cat.js swat)
+    hookSpeed: 2.0,          // m/s it is sent that way
+    hookHigh: 0.6,           // 0..1, how far up from its centre to its top the paw catches it then (it tips over)
   },
 
   // --- D: noise and the wake meter -------------------------------------------
@@ -152,8 +157,8 @@ export const tuning = {
     eyeHeight: 1.6,          // m standing
     sitEyeHeight: 1.4,       // m sitting up in bed (the mattress is 72 cm up)
     crouchEyeHeight: 0.2,    // m when he crouches to look into a hiding spot
-    walkSpeed: 1.1,          // m/s
-    chaseSpeed: 1.6,         // m/s once he has seen the cat (the cat runs at 2.0)
+    walkSpeed: 0.9,          // m/s: a sleepy stroll
+    chaseSpeed: 1.3,         // m/s once he has seen the cat, a brisk walk (the cat runs at 1.6)
     turnRate: 4.0,           // rad/s
     getUpTime: 1.4,          // s from sitting in bed to standing beside it
     lieDownTime: 1.6,        // s

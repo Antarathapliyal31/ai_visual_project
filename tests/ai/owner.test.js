@@ -110,6 +110,57 @@ describe('owner up and about', () => {
     expect(heard.filter((n) => n.impact.bodyA === owner.body || n.impact.bodyB === owner.body)).toEqual([]);
   });
 
+  describe('his routes (navigation.js route, a fine grid pulled straight)', () => {
+    const nav = createNavigator({ radius: tuning.owner.radius });
+    const solid = STATIC_BOXES.filter((b) => b.center[1] + b.half[1] > 0.1 && b.center[1] - b.half[1] < 1.6 && !b.id.startsWith('wall') && !b.id.startsWith('boundary'));
+    const inFurniture = (p) => solid.find((b) => {
+      const c = Math.cos(b.rotY ?? 0), sn = Math.sin(b.rotY ?? 0);
+      const dx = p.x - b.center[0], dz = p.z - b.center[2];
+      return Math.abs(dx * c - dz * sn) < b.half[0] && Math.abs(dx * sn + dz * c) < b.half[2];
+    });
+    const length = (from, pts) => pts.reduce((s, p, i) => s + Math.hypot(p.x - (i ? pts[i - 1] : from).x, p.z - (i ? pts[i - 1] : from).z), 0);
+    const off = (from, p, to) => {
+      const a = Math.atan2(p.z - from.z, p.x - from.x), b = Math.atan2(to.z - from.z, to.x - from.x);
+      return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    };
+
+    it('set off the way he is going and take the short way round, where waypoints went the long way', () => {
+      for (const [from, to] of [[{ x: -1.86, z: -1.65 }, { x: 2.1, z: -1.03 }], [{ x: 2.16, z: 1.05 }, { x: 3.14, z: -0.23 }], [{ x: 1.63, z: -1.94 }, { x: -0.07, z: 1.68 }]]) {
+        const byWaypoints = nav.path(from, to), route = nav.route(from, to);
+        expect(off(from, byWaypoints[0], to)).toBeGreaterThan(Math.PI / 2); // the old way set off away from it
+        expect(off(from, route[0], to)).toBeLessThan(Math.PI / 3);
+        expect(length(from, route)).toBeLessThan(length(from, byWaypoints));
+        expect(Math.hypot(route.at(-1).x - to.x, route.at(-1).z - to.z)).toBeLessThan(0.01);
+      }
+    });
+
+    it('never go through furniture, wherever from and to', () => {
+      let seed = 9;
+      const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (let n = 0; n < 150; n++) {
+        const from = nav.inside({ x: -3.2 + rand() * 6.4, z: -2.7 + rand() * 5.4 }), to = { x: -3.2 + rand() * 6.4, z: -2.7 + rand() * 5.4 };
+        if (inFurniture(from)) continue;
+        const pts = [from, ...(nav.route(from, to) ?? [])];
+        for (let i = 1; i < pts.length; i++) {
+          for (let k = 0; k <= 20; k++) {
+            const p = { x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * (k / 20), z: pts[i - 1].z + (pts[i].z - pts[i - 1].z) * (k / 20) };
+            expect(inFurniture(p)?.id, `(${from.x.toFixed(2)}, ${from.z.toFixed(2)}) -> (${to.x.toFixed(2)}, ${to.z.toFixed(2)})`).toBeUndefined();
+          }
+        }
+      }
+    });
+
+    it('take him as near as he can get to a spot he cannot stand on: under the desk, to the front of it', () => {
+      const route = nav.route({ x: 1.0, z: 1.2 }, { x: UNDER_DESK[0], z: UNDER_DESK[2] });
+      const end = route.at(-1);
+      const desk = STATIC_BOXES.find((b) => b.id === 'deskTop');
+      const front = desk.center[2] + desk.half[2];
+      expect(end.z).toBeGreaterThan(front); // in front of it, not in it
+      expect(end.z - front).toBeLessThan(tuning.owner.radius + 0.2); // and right up to it
+      expect(Math.abs(end.x - UNDER_DESK[0])).toBeLessThan(0.3);
+    });
+  });
+
   it('walks round the furniture, never through it', () => {
     const nav = createNavigator({ radius: tuning.owner.radius });
     const solid = STATIC_BOXES.filter((b) => b.center[1] + b.half[1] > 0.1 && b.center[1] - b.half[1] < 1.6 && !b.id.startsWith('wall') && !b.id.startsWith('boundary'));

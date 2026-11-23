@@ -12,8 +12,9 @@
 //  - In bed he hears from his pillow. Sitting up he can see down the bed, and
 //    seeing the cat from there wakes him fast.
 //  - Standing, he gets up on the north side of the bed and walks A* paths
-//    (navigation.js) as a kinematic body, so props and the cat are pushed
-//    aside but nothing static is walked through.
+//    (navigation.js: a fine grid of the open floor, pulled straight, so he goes
+//    round furniture close to it) as a kinematic body, so props and the cat are
+//    pushed aside but nothing static is walked through.
 //  - search: walk to the noise, look around, then sweep that part of the room
 //    (Antara's search anchors, nearest first), then (with looksUnder) check the
 //    hiding spot nearest to it. checkHidingSpot: crouch at the spot's check point and look
@@ -187,8 +188,11 @@ export function createOwner(physics, opts) {
     return best;
   }
 
+  /** The way to p: round furniture close to it (navigation.js route), the waypoints if boxed in. */
+  const wayTo = (p) => nav.route(here(), p) ?? nav.path(here(), p) ?? [nav.inside(p)];
+
   function walkTo(goal, purpose) {
-    state.path = nav.path(here(), goal) ?? [nav.inside(goal)];
+    state.path = wayTo(goal);
     state.purpose = purpose;
     state.motor = purpose === 'cat' ? 'chasing' : 'walking';
     state.look = 0;
@@ -400,7 +404,7 @@ export function createOwner(physics, opts) {
       case 'chasing': {
         repath -= dt;
         if (state.seesCat && repath <= 0) {
-          state.path = nav.path(here(), state.lastSeen) ?? [nav.inside(state.lastSeen)];
+          state.path = wayTo(state.lastSeen);
           repath = cfg.repathTime;
         }
         const arrived = follow(dt, cfg.chaseSpeed);

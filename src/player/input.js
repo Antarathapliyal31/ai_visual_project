@@ -7,12 +7,13 @@
 //   W / Up      forward        A / Left    turn left
 //   S / Down    reverse        D / Right   turn right
 //   Space       jump           J           swat
+//   Shift       run (held)
 
 const down = (keys, ...codes) => codes.some((c) => keys.has(c));
 
 /** Every key the cat uses, for preventDefault() in the page. */
 export const CAT_KEYS = new Set([
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyJ',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyJ', 'ShiftLeft', 'ShiftRight',
 ]);
 
 /**
@@ -27,6 +28,7 @@ export function inputFromKeys(keys) {
     move: null,
     jump: down(keys, 'Space'),
     swat: down(keys, 'KeyJ'),
+    run: down(keys, 'ShiftLeft', 'ShiftRight'),
   };
 }
 
@@ -50,5 +52,6 @@ export function cameraRelativeInput(keys, cameraForward) {
     move: mag > 0 ? { x: x / mag, z: z / mag } : { x: 0, z: 0 },
     jump: down(keys, 'Space'),
     swat: down(keys, 'KeyJ'),
+    run: down(keys, 'ShiftLeft', 'ShiftRight'),
   };
 }

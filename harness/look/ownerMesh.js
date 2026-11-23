@@ -7,7 +7,8 @@
 // the bed's own blanket that folds back towards the foot of the bed as he
 // sits up and stays thrown back while he is out of bed; sitting up he turns
 // up into the first frame of Working, on his knees in bed; getting up blends
-// from there to Idle at the bedside. Up and about he walks, runs when he chases the cat, and kneels
+// from there to Idle at the bedside. Up and about he walks (a slow chase
+// too) or runs, his legs at the pace he really moves at, and kneels
 // (Working) to look under the bed or the desk. His head follows where he is
 // looking. On the floor, his view is drawn as a fan that turns red as he
 // becomes sure he has seen the cat; above his head a z, ? or ! says what he
@@ -24,10 +25,17 @@ import { BED_LIE, BEDSIDE } from '../../src/ai/home.js';
 
 const MODEL_URL = '../demo/public/models/demo-avatar.glb';
 const HEIGHT = 1.72;          // m, to match the collider
+// How fast the floor goes by under a planted foot when the clips play at speed 1, at HEIGHT
+// (measured from the model): they are sped up or slowed down to his real pace, so his feet
+// don't slide. Slower than RUN_FROM, a chase uses the walk.
+const WALK_CLIP_SPEED = 1.65; // m/s
+const RUN_CLIP_SPEED = 5.0;   // m/s
+const RUN_FROM = 2.2;         // m/s
 const MATTRESS = 0.72;        // m, top of A's mattress
-const BED_YAW = Math.PI / 2;  // kneeling in bed he faces +x, down the bed
+const BED_YAW = Math.PI;      // kneeling in bed he faces +x, down the bed (the model faces -x)
 const UP = new THREE.Vector3(0, 1, 0);
-// Lying on his back: the model's up (+y) points to the headboard (-x), its front (+z) to the ceiling.
+// Lying down: the model's up (+y) points to the headboard (-x) and its +z to the ceiling, so he
+// sleeps on his side (his front, -x, faces +z); the duvet below is shaped to that.
 const Q_LIE = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
   new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)));
 const Q_KNEEL = new THREE.Quaternion().setFromAxisAngle(UP, BED_YAW);
@@ -70,8 +78,10 @@ function duvetGeometry() {
 const KNEEL_AT = new THREE.Vector3(-2.75, MATTRESS, BED_LIE.z);
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
-// The model faces +z; the simulation's heading h faces (cos h, 0, -sin h).
-const yawFor = (heading) => heading + Math.PI / 2;
+// The model faces -x (measured: a planted foot slides towards +x, his left arm is on the +z
+// side); the simulation's heading h faces (cos h, 0, -sin h). Until Nov 23 this took him to
+// face +z, which turned his body a quarter turn from where he looked and walked.
+const yawFor = (heading) => heading + Math.PI;
 
 function iconTexture(text, color) {
   const c = document.createElement('canvas');
@@ -174,6 +184,7 @@ export function createOwnerMesh(opts = {}) {
   const actions = {};
   const weights = { kneel: 0, idle: 1, walk: 0, run: 0, work: 0, punch: 0 };
   let rise = 0, time = 0, lastMotor = 'inBed', punchT = 0;
+  let pace = 0; // m/s he is really moving at, smoothed: the walk and run clips play at it
   const pos = LIE_AT.clone();
   const turn = new THREE.Quaternion().copy(Q_LIE);
 
@@ -290,19 +301,27 @@ export function createOwnerMesh(opts = {}) {
           // From facing down the bed to facing the way he stands at the bedside, the short way round.
           const from = BED_YAW + bed.yaw, to = yawFor(bedsideHeading);
           turn.setFromAxisAngle(UP, from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * p);
+          if (actions.walk) actions.walk.timeScale = 1;
           blendTo({ kneel: 1 - p, walk: Math.sin(p * Math.PI), idle: p }, dt, 12);
           placeDuvet(0);
+          pace = 0;
         } else {
           placeDuvet(0);
+          // How fast he is really going, smoothed, so his legs keep pace with the floor.
+          if (dt > 0) pace += (Math.min(6, Math.hypot(s.x - pos.x, s.z - pos.z) / dt) - pace) * Math.min(1, dt * 6);
           pos.set(s.x, 0, s.z);
           turn.setFromAxisAngle(UP, yawFor(s.heading));
           if (m !== lastMotor && m === 'caught') { actions.punch?.reset().play(); punchT = 0; }
           punchT += dt;
-          const pose = m === 'walking' ? { walk: 1 }
-            : m === 'chasing' ? { run: 1 }
+          // A chase slower than running pace is a brisk walk: the Run clip only looks right fast.
+          const running = m === 'chasing' && pace > RUN_FROM;
+          const pose = m === 'walking' || (m === 'chasing' && !running) ? { walk: 1 }
+            : running ? { run: 1 }
               : m === 'crouching' ? { work: 1 }
                 : m === 'caught' ? (punchT < 0.9 ? { punch: 1 } : { idle: 1 })
                   : { idle: 1 };
+          if (actions.walk) actions.walk.timeScale = Math.min(1.6, Math.max(0.3, pace / WALK_CLIP_SPEED));
+          if (actions.run) actions.run.timeScale = Math.min(1.6, Math.max(0.3, pace / RUN_CLIP_SPEED));
           blendTo(pose, dt);
         }
         lastMotor = m;

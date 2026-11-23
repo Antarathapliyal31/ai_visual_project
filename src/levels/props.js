@@ -8,6 +8,7 @@
 import { SURFACES, STATIC_BOXES } from '../collision/index.js';
 import { spawnSliceScene } from '../physics/sliceScene.js';
 import { stackHeights } from '../physics/props.js';
+import { SHELF_FILL } from '../physics/roomScene.js'; // a bookshelf is filled as in the original room
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -42,8 +43,6 @@ function placed(physics, T) {
     },
   };
 }
-
-const SHELF_FILL = [0.92, 0.7, 0.82, 0.45];
 
 /** What each piece carries, in its canonical placement. */
 const PROPS = {

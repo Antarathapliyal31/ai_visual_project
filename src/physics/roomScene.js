@@ -1,7 +1,7 @@
 // Room scene (Workstream B): the slice scene plus the room clusters.
 //
 //   desk        the slice scene (five plates, two mugs, a book), a lamp, a monitor and keyboard
-//   bookshelf   rows of standing books, a few lying in piles, a plant on top
+//   bookshelf   rows of standing books, a few lying in piles, a plant on top; room for the cat on the two lowest shelves
 //   nightstand  a lamp and an alarm clock, under the wall shelf's books and plant
 //   bed         a pillow
 //   plants      one on the window sill, a big one on the floor
@@ -39,8 +39,11 @@ function extents(id) {
   return { cx, cy, cz, minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz, top: cy + hy };
 }
 
-// How full each bookshelf shelf is, bottom to top (the rest stays free for the cat).
-const SHELF_FILL = [0.92, 0.7, 0.82, 0.45];
+// How full each bookshelf shelf is, bottom to top. The two lowest keep a cat-sized
+// opening (40 cm) at the right-hand end, with no books lying in it: the cat walks
+// into the bottom one and jumps into the next, then shoves the row of books over.
+export const SHELF_FILL = [0.5, 0.5, 0.82, 0.45];
+export const CAT_SHELVES = 2;
 
 /**
  * @param {ReturnType<import('./world.js').createPhysicsWorld>} physics
@@ -72,8 +75,8 @@ export function spawnRoomScene(physics, opts = {}) {
       shelfBooks.push(book([x + thick / 2, y, shelfZ], [thick / 2, between(0.10, 0.145), between(0.07, 0.085)]));
       x += thick + 0.004;
     }
-    // Room left over: a couple of books lying flat.
-    if (x1 - x >= 2 * std.half[0] + 0.05) {
+    // Room left over, on a shelf above the cat's: a couple of books lying flat.
+    if (i >= CAT_SHELVES && x1 - x >= 2 * std.half[0] + 0.05) {
       const px = x + 0.03 + std.half[0];
       stackHeights(y, std.half[1], i % 2 ? 3 : 2).forEach((py) => {
         shelfBooks.push(physics.spawn('book', { position: [px, py, shelfZ], rotY: between(-0.12, 0.12) }));

@@ -32,8 +32,8 @@ describe('what a room holds', () => {
 
   it('sets the goal at a share of all the chaos the room could make', () => {
     const { contents } = room();
-    // 78 props x 10 + 8 plates and mugs x 40 = 1100; a quarter, to the nearest 10.
-    expect(goalFor(contents, tuning)).toBe(280);
+    // 70 props x 10 + 8 plates and mugs x 40 = 1020; a quarter, to the nearest 10.
+    expect(goalFor(contents, tuning)).toBe(260);
   });
 
   it('gives one star for a won night and one per mission, none for a lost one', () => {

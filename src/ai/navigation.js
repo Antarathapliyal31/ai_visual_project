@@ -139,5 +139,122 @@ export function createNavigator(opts = {}) {
     return nodes.reduce((best, n) => (dist(n, p) < dist(best, p) ? n : best), nodes[0]);
   }
 
-  return { nodes, clear, path, nearest, inside };
+  // ------------------------------------------------------------ routes
+  // The waypoints alone can send him the long way round: to get to a cat across a
+  // table he can see over, he heads for whichever waypoint starts the shortest
+  // waypoint route, which can be off to one side or behind him. route() finds the
+  // shortest way over a 15 cm grid of the open floor instead, and pulls it straight,
+  // so he goes round furniture close to it, setting off roughly the way he is going.
+  // A spot he can't stand on (the cat under a table) gets him as near as he can get.
+  // path() stays as it was for the level checks (validate.js), whose measures use it.
+  const STEP = 0.15;
+  const roomy = radius * 0.75; // a little under his width, as for the ends of a waypoint route
+  let grid = null;
+  function buildGrid() {
+    const nx = Math.max(1, Math.floor((room.maxX - room.minX) / STEP));
+    const nz = Math.max(1, Math.floor((room.maxZ - room.minZ) / STEP));
+    const at = (k) => ({ x: room.minX + (Math.floor(k / nz) + 0.5) * STEP, z: room.minZ + ((k % nz) + 0.5) * STEP });
+    const free = new Uint8Array(nx * nz);
+    for (let k = 0; k < free.length; k++) {
+      const p = at(k);
+      if (p.x < room.minX + radius || p.x > room.maxX - radius || p.z < room.minZ + radius || p.z > room.maxZ - radius) continue;
+      free[k] = clear(p, p, roomy) ? 1 : 0;
+    }
+    return { nx, nz, at, free };
+  }
+
+  /**
+   * Points to walk through from `from` towards `to`: to `to` itself if he can get
+   * there, else to the floor nearest it that he can reach. Null if he is boxed in.
+   * @returns {{x: number, z: number}[] | null}
+   */
+  function route(from, to) {
+    const goal = inside(to);
+    if (clear(from, goal, roomy)) return [goal];
+    grid ??= buildGrid();
+    const { nx, nz, at, free } = grid;
+    const cellOf = (p) => Math.min(nx - 1, Math.max(0, Math.floor((p.x - room.minX) / STEP))) * nz
+      + Math.min(nz - 1, Math.max(0, Math.floor((p.z - room.minZ) / STEP)));
+    // Set off from the nearest open cell he can step to (he may stand closer to furniture than the grid allows).
+    const c0 = cellOf(from), i0 = Math.floor(c0 / nz), j0 = c0 % nz;
+    let start = -1, startD = Infinity;
+    for (let di = -4; di <= 4; di++) {
+      for (let dj = -4; dj <= 4; dj++) {
+        const i = i0 + di, j = j0 + dj;
+        if (i < 0 || j < 0 || i >= nx || j >= nz || !free[i * nz + j]) continue;
+        const d = dist(at(i * nz + j), from);
+        if (d < startD && clear(from, at(i * nz + j), radius * 0.5)) { start = i * nz + j; startD = d; }
+      }
+    }
+    if (start < 0) return null;
+
+    // Dijkstra over the open cells, 8 ways, never cutting a blocked corner.
+    const cost = new Float64Array(free.length).fill(Infinity), prev = new Int32Array(free.length).fill(-1);
+    const heap = [[0, start]];
+    cost[start] = 0;
+    const push = (item) => {
+      heap.push(item);
+      for (let n = heap.length - 1; n > 0;) {
+        const up = (n - 1) >> 1;
+        if (heap[up][0] <= heap[n][0]) break;
+        [heap[up], heap[n]] = [heap[n], heap[up]];
+        n = up;
+      }
+    };
+    const pop = () => {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        for (let n = 0; ;) {
+          const l = 2 * n + 1, r = l + 1;
+          let m = n;
+          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+          if (m === n) break;
+          [heap[m], heap[n]] = [heap[n], heap[m]];
+          n = m;
+        }
+      }
+      return top;
+    };
+    while (heap.length) {
+      const [c, k] = pop();
+      if (c > cost[k]) continue;
+      const i = Math.floor(k / nz), j = k % nz;
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          if (!di && !dj) continue;
+          const a = i + di, b = j + dj;
+          if (a < 0 || b < 0 || a >= nx || b >= nz || !free[a * nz + b]) continue;
+          if (di && dj && (!free[a * nz + j] || !free[i * nz + b])) continue;
+          const next = c + (di && dj ? Math.SQRT2 : 1) * STEP, n = a * nz + b;
+          if (next < cost[n]) { cost[n] = next; prev[n] = k; push([next, n]); }
+        }
+      }
+    }
+
+    // Where to make for: the reached cell nearest the goal (the goal's own, if he can stand there).
+    let end = start, endD = Infinity;
+    for (let k = 0; k < free.length; k++) {
+      if (cost[k] === Infinity) continue;
+      const d = dist(at(k), goal);
+      if (d < endD - 1e-9 || (Math.abs(d - endD) <= 1e-9 && cost[k] < cost[end])) { end = k; endD = d; }
+    }
+    const cells = [];
+    for (let k = end; k !== -1; k = prev[k]) cells.unshift(at(k));
+    if (clear(cells.at(-1), goal, roomy)) cells.push(goal);
+
+    // Pulled straight: from each corner, on to the furthest point he can walk to in a line.
+    const out = [];
+    for (let here = from, k = 0; k < cells.length;) {
+      let far = k;
+      for (let j = cells.length - 1; j > k; j--) if (clear(here, cells[j], roomy)) { far = j; break; }
+      out.push(cells[far]);
+      here = cells[far];
+      k = far + 1;
+    }
+    return out;
+  }
+
+  return { nodes, clear, path, route, nearest, inside };
 }
