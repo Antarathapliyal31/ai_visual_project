@@ -46,6 +46,7 @@ const UP_MOTORS = new Set(['walking', 'scanning', 'crouching', 'waiting', 'chasi
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const headingTo = (from, to) => Math.atan2(-(to.z - from.z), to.x - from.x);
 const flat = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const SAME_PLACE = 1.0; // m: a noise or sighting this near where he has already looked round is no new lead
 const VISION_EVERY = 4; // substeps between sight checks (30 Hz at 120 Hz)
 
 // Antara's search anchors: places to look from in each part of the room.
@@ -162,7 +163,7 @@ export function createOwner(physics, opts) {
   }
 
   function nextSearchGoal(p) {
-    if (!state.routeFor || flat(state.routeFor, p) > 0.5) {
+    if (!state.routeFor || flat(state.routeFor, p) > SAME_PLACE) {
       state.routeFor = { x: p.x, z: p.z };
       state.route = searchRoute(p);
     }
@@ -218,6 +219,18 @@ export function createOwner(physics, opts) {
       brain.clearNoise();
     }
     return walkTo(home.bedside, 'bed');
+  }
+
+  /**
+   * Has the tree something new for him to look into: a noise or a sighting he hasn't
+   * already looked round? While it still says "search" about one he has finished with,
+   * he carries on back to bed (deciding again every step kept him standing on the spot).
+   */
+  function newLead() {
+    if (state.action !== 'search' && state.action !== 'checkHidingSpot') return false;
+    const t = brain.getTarget() ?? brain.getLastSeenCat();
+    if (!t) return false;
+    return !state.routeFor || flat(state.routeFor, { x: t[0], z: t[2] }) > SAME_PLACE || state.route.length > 0;
   }
 
   /** The noise he was following has been dealt with. */
@@ -349,7 +362,7 @@ export function createOwner(physics, opts) {
         break;
       case 'walking':
         // A new job from the tree (a noise while going back to bed) replaces the walk home.
-        if (state.purpose === 'bed' && (state.action === 'search' || state.action === 'checkHidingSpot')) { decide(); break; }
+        if (state.purpose === 'bed' && newLead()) { decide(); break; }
         if (follow(dt, cfg.walkSpeed)) {
           if (state.purpose === 'noise') { state.motor = 'scanning'; state.timer = cfg.scanTime; }
           else if (state.purpose === 'hide') { state.motor = 'crouching'; state.timer = cfg.crouchTime; }
@@ -385,14 +398,15 @@ export function createOwner(physics, opts) {
         break;
       }
       case 'waiting':
-        // By the bed, looking round once more; any new job sends him off again. Once he is
-        // no longer wide awake and hasn't seen the cat for a moment, he gives up and lies down.
+        // By the bed, looking round once more (bedsideLook); a new lead sends him off again.
+        // Then, if he hasn't seen the cat for a moment, he gives up and lies down, however awake
+        // he still is: lying down calms him to drowsy (settleWake), and a new noise gets him up.
         body.velocity.set(0, 0, 0);
         faceTowards(home.waitLookAt, dt);
         state.timer += dt;
         state.look = 0.6 * Math.sin(state.timer * 0.9);
-        if (state.action === 'search' || state.action === 'checkHidingSpot') decide();
-        else if (!UP_STAGES.has(state.stage) && state.lostFor >= (cfg.settleAfter ?? 0)) {
+        if (newLead()) decide();
+        else if (state.timer >= (cfg.bedsideLook ?? 0) && state.lostFor >= (cfg.settleAfter ?? 0)) {
           state.motor = 'lyingDown';
           state.timer = cfg.lieDownTime;
           state.progress = 0;

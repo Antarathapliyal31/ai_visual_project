@@ -76,17 +76,25 @@ describe('owner up and about', () => {
     // Three plates dropped on the open floor between the bed and the desk.
     const at = [-0.6, -1.3];
     for (let i = 0; i < 3; i++) s.physics.spawn('plate', { position: [at[0] + 0.1 * i, 1.0 + 0.2 * i, at[1]] });
-    let closest = Infinity, scanned = false, up = 0;
-    s.run(20, () => {
-      closest = Math.min(closest, Math.hypot(s.owner.state.x - at[0], s.owner.state.z - at[1]));
-      if (s.owner.state.motor === 'scanning') scanned = true;
+    let closest = Infinity, scanned = false, stuck = 0, longest = 0, last = null;
+    const start = s.physics.stepCount;
+    s.run(40, () => {
+      const st = s.owner.state;
+      closest = Math.min(closest, Math.hypot(st.x - at[0], st.z - at[1]));
+      if (st.motor === 'scanning') scanned = true;
+      // Somewhere to walk to, yet neither walking nor turning: stuck (deciding again every step did that).
+      const still = last && Math.hypot(st.x - last.x, st.z - last.z) < 1e-6 && Math.abs(st.heading - last.heading) < 1e-6;
+      stuck = st.motor === 'walking' && st.path.length && still ? stuck + 1 : 0;
+      longest = Math.max(longest, stuck);
+      last = { x: st.x, z: st.z, heading: st.heading };
+      return !(scanned && st.motor === 'inBed');
     });
     expect(closest).toBeLessThan(0.6);
     expect(scanned).toBe(true);
-    // He never saw the cat: back in bed within half a minute of the crash, not wandering the room.
-    s.run(40, () => { up = s.physics.stepCount; return s.owner.state.motor !== 'inBed'; });
+    expect(longest / 120).toBeLessThan(0.25);
+    // He never saw the cat: one look round where it was, and back in bed within 16 s of the crash.
     expect(s.owner.state.motor).toBe('inBed');
-    expect(up / 120).toBeLessThan(30);
+    expect((s.physics.stepCount - start) / 120).toBeLessThan(16);
     s.run(20, () => s.owner.state.stage !== 'asleep'); // drowsy, then asleep
     expect(s.owner.state.stage).toBe('asleep');
     expect(s.caught).toHaveLength(0); // the cat was under the bed all along

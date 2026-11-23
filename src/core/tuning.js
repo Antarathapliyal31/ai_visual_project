@@ -99,7 +99,7 @@ export const tuning = {
     radius: 0.12,            // m; collider is 2r = 24 cm tall, under the 26 cm desk gap
     bodyHalfLength: 0.10,    // m; two spheres at +-this along the heading (0 = one sphere)
     speed: 1.6,              // m/s forward (still outruns his chase, 1.3)
-    runSpeed: 2.6,           // m/s forward with Shift held
+    runSpeed: 3.0,           // m/s forward with Shift held
     reverseFactor: 0.6,      // backing up is slower
     turnRate: 1.5,           // rad/s (86 degrees a second), car-style turning; the chase camera swings round with it
     turnAccel: 6,            // rad/s^2: a turn builds up (full rate in 0.25 s), so a tap turns a few degrees, not a lurch...
@@ -162,13 +162,14 @@ export const tuning = {
     turnRate: 4.0,           // rad/s
     getUpTime: 1.4,          // s from sitting in bed to standing beside it
     lieDownTime: 1.6,        // s
-    scanTime: 2.5,           // s he looks around where the noise was
+    scanTime: 2.0,           // s he looks around where the noise was
     sweepPoints: 2,          // search anchors he also checks round a noise or a lost cat (Antara's)
     looksUnder: false,       // crouch to look into hiding places (Christina's checkHidingSpot)? Off since Nov 23, at Rushi's
                              // call: a cat that has made it under the bed, the desk or a table is safe there
     crouchTime: 1.6,         // s he looks into a hiding spot (with looksUnder)
     checkNearNoise: 1.5,     // m; with looksUnder and only a noise to go on, he looks into a hiding spot only this close to it
     settleAfter: 2.0,        // s without seeing the cat before he gives up at the bedside and lies down
+    bedsideLook: 1.5,        // s he looks round by the bed before he lies down
     settleWake: 0.4,         // wake he settles to as he lies back down: drowsy, drifting off
     visionRange: 5.5,        // m
     visionAngle: 0.85,       // rad, half-angle of his view

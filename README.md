@@ -25,9 +25,19 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## The owner gets back to bed sooner, and a faster run (Nov 23)
+
+After one crash, with the cat hidden, he is now back in bed 13 s after the crash (was 20) and asleep at 17 s (was 24). Seen and then lost under the bed, he is back in bed about 10 s later.
+
+- **Fixed: he stood frozen for about 5 s before walking back** (`src/ai/owner.js`). Once he had looked round everywhere he had to, the behaviour tree still said "search" for a while. On every physics step he decided again, set off for bed, and never took a step. Now only a new lead sends him off again (`newLead()`): a noise or sighting more than a metre from where he has already looked round (`SAME_PLACE`).
+- **At the bedside** he looks round for 1.5 s (`tuning.owner.bedsideLook`). Then, if he hasn't seen the cat for 2 s (`settleAfter`), he lies down, however awake he still is; lying down calms him to drowsy, and a new noise gets him up again. Before, he waited at the bedside for the wake meter to drain below standing.
+- **One look round** where the noise was: `scanTime` 2.5 → 2.0 s. A second clatter within a metre of the first no longer gets a second look round.
+- **A faster run:** Shift now runs the cat at 3.0 m/s (`tuning.cat.runSpeed`, was 2.6); walking stays 1.6.
+- **For C:** the crash test in `tests/ai/owner.test.js` now checks he is back in bed within 16 s, and never stands frozen with somewhere to walk to.
+
 ## Slower, Shift to run, a bookshelf the cat can raid, and an owner who faces where he looks (Nov 23)
 
-- **Slower, with Shift to run** (`tuning.cat`, `src/player/input.js`). The cat walks at 1.6 m/s (was 2.0); `groundAccel` 6.4 and `brakeAccel` 13 keep its start and stop as quick. Holding Shift runs it at 2.6 m/s (`runSpeed`), forwards only. The owner walks at 0.9 m/s (was 1.1) and chases at 1.3 (was 1.6), so the walking cat still outruns him by a quarter.
+- **Slower, with Shift to run** (`tuning.cat`, `src/player/input.js`). The cat walks at 1.6 m/s (was 2.0); `groundAccel` 6.4 and `brakeAccel` 13 keep its start and stop as quick. Holding Shift runs it at 3.0 m/s (`runSpeed`), forwards only. The owner walks at 0.9 m/s (was 1.1) and chases at 1.3 (was 1.6), so the walking cat still outruns him by a quarter.
 - **He faces where he looks and walks** (`look/ownerMesh.js`). The model faces -x, but `yawFor` turned it as if it faced +z, so his body stood a quarter turn off his heading: his vision cone came out of his side, and he walked sideways. Kneeling up in bed had the same error (`BED_YAW`). Now his body and his cone agree to within a few degrees, standing, walking, chasing and sitting up. Lying down is unchanged: he sleeps on his side, which the duvet is shaped to.
 - **His legs keep pace with him.** The walk and run clips used to play at full speed whatever he was doing. Measured from the model, a planted foot slides back at about 1.65 m/s in the walk clip and 5.0 m/s in the run, so his legs went 1.5 and 3 times too fast. Now the clips play at the pace he really moves at, and a chase slower than 2.2 m/s is a brisk walk.
 - **The bookshelf has room for the cat** (`SHELF_FILL` in `physics/roomScene.js`, shared with `levels/props.js`). Its two lowest shelves are half full, leaving a 40 cm opening at the right-hand end. The cat walks into the bottom one, and jumps into the next from a run-up. With fewer books the original room has 70 props (was 78) and a chaos goal of 260 (was 280).
