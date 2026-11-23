@@ -123,6 +123,8 @@ export function createWakeMeter(cfg) {
       return level;
     },
     reset() { level = 0; quietFor = Infinity; },
+    /** He settles: the level drops to `to` if it is above it (he lies back down in bed). */
+    calm(to) { level = Math.min(level, Math.max(0, to)); },
   };
 }
 
@@ -139,6 +141,8 @@ export function createNoise(physics, opts) {
   let loudest = 0;
   const harvester = createImpactHarvester(physics, {
     onImpact(e) {
+      // His own bumps (walking into a chair, nudging a plate on the floor) don't wake him: he knows he made them.
+      if (e.bodyA?.userData?.kind === 'owner' || e.bodyB?.userData?.kind === 'owner') return;
       const loudness = impactLoudness(e, physics.materials, cfg);
       const ear = opts.listener();
       const d = Math.hypot(e.point.x - ear.x, e.point.y - ear.y, e.point.z - ear.z);

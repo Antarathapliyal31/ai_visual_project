@@ -25,6 +25,16 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## The owner gives up sooner when he can't see the cat (Nov 23)
+
+After one crash, with the cat hidden under the bed, he used to stay up for about a minute: 7 looks round the room and a hiding place checked, then standing by the bed until the wake meter drained to "asleep". Now he is back asleep in about 23 s (measured, same crash):
+
+- **A noise alone gets a look, not a search** (`src/ai/owner.js`). He walks to it and looks round. He looks into a hiding place only if it's within 1.5 m of the noise (`tuning.owner.checkNearNoise`). The sweep of the room and hiding places further off are for when he has actually seen the cat and lost it.
+- **He settles back into bed.** At the bedside, once he is no longer wide awake and hasn't seen the cat for 2 s (`settleAfter`), he lies down, and lying down calms the meter to drowsy (`settleWake`, 0.4). He drifts off in bed, where a new noise can still wake him.
+- **His own bumps don't wake him** (`src/noise/noise.js`). Walking into a chair or a plate on the floor used to count as a new noise, which sent him searching again. Impacts involving his body are now ignored. Things he knocks that then clatter still count.
+- **For D:** `noise.js` skips impacts involving the owner's body, and the wake meter has `calm(to)`.
+- **For C:** `owner.js` tracks `sawCat` (reset when he is back in bed) and uses it to choose between a look and a search. The owner tests in `tests/ai/owner.test.js` cover a noise alone, a lost cat, and his own bumps.
+
 ## A goal for every night (Nov 23): chaos goal, missions and stars
 
 Before this, dawn was a win whatever the cat did, so hiding under the bed all night won. Now:
@@ -53,7 +63,7 @@ Before this, dawn was a win whatever the cat did, so hiding under the bed all ni
 
 ## Levels (Nov 22-23): rooms LLMs design from a furniture inventory, by difficulty
 
-From the professor's A3 suggestion. On the menu the player picks a difficulty, Easy, Medium or Hard, and the game picks a room of that difficulty they have not played yet; after a round, "Next room" picks another. The rooms are designed by language models from a furniture inventory, checked by a validator, and measured for difficulty; the game ships them as files and never calls a model. `npm test` runs 394 tests in 29 files.
+From the professor's A3 suggestion. On the menu the player picks a difficulty, Easy, Medium or Hard, and the game picks a room of that difficulty they have not played yet; after a round, "Next room" picks another. The rooms are designed by language models from a furniture inventory, checked by a validator, and measured for difficulty; the game ships them as files and never calls a model. `npm test` runs 396 tests in 29 files.
 
 - **The inventory** (`src/levels/inventory.js`): 16 pieces. The 11 in the original room are Dharm's boxes as they are, grouped by piece. Five are new, with new ways to hide: a dining table whose cloth hangs almost to the floor (hidden like under the bed), skirted armchairs (hidden even from a crouch), open cardboard boxes (seen into only from in front of the opening), stacked boxes and a tall wardrobe.
 - **A level is data** (`src/levels/compile.js`): wall pieces `{item, wall, at}`, floor pieces `{item, x, z, turn}`, and where the cat starts. Compiling moves and turns each piece's colliders, hiding places and props, and for the bed the owner's home (where he lies, sits up and gets out), and lays a 45 cm grid of points the owner can stand on as his waypoints. The original room is written in the same format, and a test checks that compiling it gives back Dharm's room box for box; the game still plays it on the original constants and hand-placed waypoints, so nothing tested before changes.

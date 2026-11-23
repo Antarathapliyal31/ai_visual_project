@@ -69,22 +69,43 @@ describe('owner in bed', () => {
 });
 
 describe('owner up and about', () => {
-  it('a real crash wakes him: he walks to it, looks around and goes back to bed once it is quiet', () => {
+  it('a real crash wakes him: he walks to it, looks around, and soon gives up and goes back to sleep', () => {
     const s = setup();
     // Three plates dropped on the open floor between the bed and the desk.
     const at = [-0.6, -1.3];
     for (let i = 0; i < 3; i++) s.physics.spawn('plate', { position: [at[0] + 0.1 * i, 1.0 + 0.2 * i, at[1]] });
-    let closest = Infinity, scanned = false;
+    let closest = Infinity, scanned = false, up = 0;
     s.run(20, () => {
       closest = Math.min(closest, Math.hypot(s.owner.state.x - at[0], s.owner.state.z - at[1]));
       if (s.owner.state.motor === 'scanning') scanned = true;
     });
     expect(closest).toBeLessThan(0.6);
     expect(scanned).toBe(true);
-    s.run(90, () => s.owner.state.motor !== 'inBed');
+    // He never saw the cat: back in bed within half a minute of the crash, not wandering the room.
+    s.run(40, () => { up = s.physics.stepCount; return s.owner.state.motor !== 'inBed'; });
     expect(s.owner.state.motor).toBe('inBed');
+    expect(up / 120).toBeLessThan(30);
+    s.run(20, () => s.owner.state.stage !== 'asleep'); // drowsy, then asleep
     expect(s.owner.state.stage).toBe('asleep');
     expect(s.caught).toHaveLength(0); // the cat was under the bed all along
+  });
+
+  it('his own bumps are not noises to him', () => {
+    // Mugs on the floor in his way: walking into them is his doing, not something to go and look at.
+    const physics = createPhysicsWorld({ tuning: freshTuning() });
+    const cat = createCat(physics, { position: UNDER_BED, heading: 0 });
+    let owner;
+    const heard = [];
+    const noise = createNoise(physics, { listener: () => owner.head(), onNoise: (n) => { heard.push(n); owner.hear(n); } });
+    owner = createOwner(physics, { cat, wake: noise.meter });
+    for (let i = 0; i < 120; i++) physics.step();
+    const mugs = [-1.6, -1.2, -0.8].map((x) => physics.spawn('mug', { base: [x, 0, -1.4] }));
+    for (let i = 0; i < 30; i++) physics.step();
+    noise.meter.raise(0.8);
+    owner.hear({ position: { x: 0.3, y: 0.05, z: -1.4 }, loudness: 0.8, heardLoudness: 0.8 });
+    for (let i = 0; i < 120 * 8; i++) physics.step();
+    expect(mugs.some((m) => Math.hypot(m.body.position.x - m.body.initPosition.x, m.body.position.z - m.body.initPosition.z) > 0.05)).toBe(true); // he did push through them
+    expect(heard.filter((n) => n.impact.bodyA === owner.body || n.impact.bodyB === owner.body)).toEqual([]);
   });
 
   it('walks round the furniture, never through it', () => {
@@ -111,20 +132,44 @@ describe('owner up and about', () => {
     }
   });
 
-  it('searches the sound first, then sweeps that part of the room before giving up', () => {
+  /** Where he stops to look around, in order, and the hiding places he crouches to look into. */
+  const watch = (s, seconds) => {
+    const goals = [], crouched = [];
+    s.run(seconds, () => {
+      const st = s.owner.state;
+      if (st.motor === 'scanning' && st.noise) {
+        if (!goals.some((p) => Math.hypot(p.x - st.noise.x, p.z - st.noise.z) < 0.05)) goals.push({ x: st.noise.x, z: st.noise.z });
+      }
+      if (st.motor === 'crouching' && !crouched.includes(st.spot.id)) crouched.push(st.spot.id);
+    });
+    return { goals, crouched };
+  };
+
+  it('with only a noise to go on, he looks where it was and nowhere else', () => {
     const s = setup(); // the cat stays hidden under the bed
     s.noise.meter.raise(0.8);
     s.sound([1.2, 1.8]); // south-east of the room, near nothing
-    const goals = [];
-    s.run(40, () => {
-      if (s.owner.state.motor === 'scanning' && s.owner.state.noise) {
-        const g = s.owner.state.noise;
-        if (!goals.some((p) => Math.hypot(p.x - g.x, p.z - g.z) < 0.05)) goals.push({ x: g.x, z: g.z });
-      }
+    const { goals, crouched } = watch(s, 40);
+    expect(goals).toHaveLength(1);
+    expect(Math.hypot(goals[0].x - 1.2, goals[0].z - 1.8)).toBeLessThan(0.05);
+    expect(s.owner.state.motor === 'inBed' || s.owner.state.motor === 'lyingDown').toBe(true);
+    expect(crouched).toEqual([]);
+  });
+
+  it('once he has seen the cat and lost it, he searches harder: hiding places further off, and a sweep', () => {
+    const s = setup({ catAt: [-1.0, R + 0.001, -1.3] }); // in front of the bed, where he'll see it as he gets up
+    s.noise.meter.raise(0.8);
+    s.run(8, () => !s.owner.state.seesCat);
+    expect(s.owner.state.seesCat).toBe(true);
+    s.cat.teleport(UNDER_BED); // and it dashes under the bed, out of sight
+    let crouchedAt = null, planned = 0;
+    s.run(30, () => {
+      if (s.owner.state.motor === 'crouching') crouchedAt ??= s.owner.state.spot.id;
+      planned = Math.max(planned, s.owner.state.route.length);
     });
-    expect(goals.length).toBeGreaterThanOrEqual(2);
-    expect(Math.hypot(goals[0].x - 1.2, goals[0].z - 1.8)).toBeLessThan(0.05); // the sound itself first
-    for (const g of goals.slice(1)) expect(Math.hypot(g.x - 1.2, g.z - 1.8)).toBeGreaterThan(0.8);
+    expect(crouchedAt).toBe('underBed'); // he looks under the bed after it, though the skirt hides it
+    expect(planned).toBeGreaterThanOrEqual(1); // and lines up places to look round there
+    expect(s.caught).toHaveLength(0);
   });
 
   it('pushes a prop out of his way instead of stopping', () => {

@@ -105,6 +105,7 @@ export function createOwner(physics, opts) {
     route: [],          // the rest of the search route for routeFor
     routeFor: null,     // the sound or sighting the route is for
     seesCat: false,
+    sawCat: false,      // he has seen the cat since he last got into bed: then he searches properly
     catDistance: Infinity,
     spotted: 0,         // 0..1; full means caught
     caught: false,
@@ -143,11 +144,13 @@ export function createOwner(physics, opts) {
   }
 
   /**
-   * Where to look for a sound or a lost cat at p: p itself first, then the
-   * search anchors of that part of the room, nearest first. Each search target
+   * Where to look for a sound or a lost cat at p: p itself first, then (once
+   * he has seen the cat) the search anchors of that part of the room, nearest
+   * first. A noise alone gets a look where it was, no more. Each search target
    * gets its route once, so a fading suspicion can't send him round in circles.
    */
   function searchRoute(p) {
+    if (!state.sawCat) return [{ x: p.x, z: p.z }];
     const anchors = (anchorsFor[roomAreaOf(p)] ?? anchorsFor.center)
       .filter((a) => flat(a, p) > 0.8)
       .sort((a, b) => flat(a, p) - flat(b, p))
@@ -163,9 +166,12 @@ export function createOwner(physics, opts) {
     return state.route.shift() ?? null;
   }
 
-  /** The hiding spot whose check point is nearest p, skipping the ones checked already. */
+  /**
+   * The hiding spot whose check point is nearest p, skipping the ones checked
+   * already. With only a noise to go on he looks only right by it.
+   */
   function nearestSpot(p, within = Infinity) {
-    let best = null, bestD = within;
+    let best = null, bestD = state.sawCat ? within : Math.min(within, cfg.checkNearNoise ?? within);
     for (const v of volumes) {
       if (state.checked.has(v.id)) continue;
       const center = { x: (v.min[0] + v.max[0]) / 2, z: (v.min[2] + v.max[2]) / 2 };
@@ -265,6 +271,7 @@ export function createOwner(physics, opts) {
     }
     const c = cat.body.position;
     if (state.seesCat) {
+      state.sawCat = true;
       state.lastSeen = { x: c.x, z: c.z };
       brain.trackLastSeenCat([c.x, 0, c.z]);
       state.lostFor = 0;
@@ -370,18 +377,20 @@ export function createOwner(physics, opts) {
         break;
       }
       case 'waiting':
-        // By the bed, looking around, until the meter calms down; any new job sends him off again.
+        // By the bed, looking round once more; any new job sends him off again. Once he is
+        // no longer wide awake and hasn't seen the cat for a moment, he gives up and lies down.
         body.velocity.set(0, 0, 0);
         faceTowards(home.waitLookAt, dt);
         state.timer += dt;
         state.look = 0.6 * Math.sin(state.timer * 0.9);
         if (state.action === 'search' || state.action === 'checkHidingSpot') decide();
-        else if (state.stage === 'asleep') {
+        else if (!UP_STAGES.has(state.stage) && state.lostFor >= (cfg.settleAfter ?? 0)) {
           state.motor = 'lyingDown';
           state.timer = cfg.lieDownTime;
           state.progress = 0;
           state.look = 0;
           solid(false);
+          wake.calm?.(cfg.settleWake ?? 0); // back under the covers: drowsy, drifting off
         }
         break;
       case 'chasing': {
@@ -406,6 +415,7 @@ export function createOwner(physics, opts) {
           place(home.lie.x, home.lie.z, home.facing);
           state.motor = 'inBed';
           state.progress = 0;
+          state.sawCat = false; // a fresh start: next time he gets up, a noise is only a noise
         }
         break;
       default:

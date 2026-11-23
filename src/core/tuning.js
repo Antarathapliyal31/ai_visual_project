@@ -158,6 +158,9 @@ export const tuning = {
     scanTime: 2.5,           // s he looks around where the noise was
     sweepPoints: 2,          // search anchors he also checks round a noise or a lost cat (Antara's)
     crouchTime: 1.6,         // s he looks into a hiding spot
+    checkNearNoise: 1.5,     // m; with only a noise to go on (no sight of the cat), he looks into a hiding spot only this close to it
+    settleAfter: 2.0,        // s without seeing the cat before he gives up at the bedside and lies down
+    settleWake: 0.4,         // wake he settles to as he lies back down: drowsy, drifting off
     visionRange: 5.5,        // m
     visionAngle: 0.85,       // rad, half-angle of his view
     sitVisionRange: 3.5,     // m, sitting up in bed
