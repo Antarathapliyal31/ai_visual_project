@@ -98,12 +98,13 @@ export const tuning = {
     mass: 3.0,               // kg
     radius: 0.12,            // m; collider is 2r = 24 cm tall, under the 26 cm desk gap
     bodyHalfLength: 0.10,    // m; two spheres at +-this along the heading (0 = one sphere)
-    speed: 3.0,              // m/s forward
+    speed: 2.4,              // m/s forward (still outruns his chase, 1.9)
     reverseFactor: 0.6,      // backing up is slower
-    turnRate: 3.2,           // rad/s, car-style turning
-    moveTurnRate: 12,        // rad/s when steering by a world direction (camera-relative input)
-    groundAccel: 30,         // m/s^2 towards the target velocity on the ground
-    brakeAccel: 40,          // m/s^2 with no input on the ground
+    turnRate: 2.2,           // rad/s, car-style turning
+    turnAccel: 14,           // rad/s^2: turning eases in and out (full rate in ~0.15 s) rather than snapping
+    moveTurnRate: 8,         // rad/s when steering by a world direction (camera-relative input)
+    groundAccel: 12,         // m/s^2 towards the target velocity on the ground (full speed in 0.2 s)
+    brakeAccel: 16,          // m/s^2 with no input on the ground: it glides to a stop
     airAccel: 8,             // m/s^2 of air control
     jumpHeight: 1.1,         // m apex; the desk top is at 0.94
     coyoteTime: 0.08,        // s after leaving a ledge when a jump still counts

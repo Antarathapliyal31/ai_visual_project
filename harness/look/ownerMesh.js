@@ -11,7 +11,9 @@
 // (Working) to look under the bed or the desk. His head follows where he is
 // looking. On the floor, his view is drawn as a fan that turns red as he
 // becomes sure he has seen the cat; above his head a z, ? or ! says what he
-// is up to.
+// is up to. When he is in the way of play.html's chase camera (it is over
+// his pillow, with the cat under the bed) he and the sign fade, dithered
+// (alphaHash), so he never fills the view.
 //
 // It only reads the simulation (src/ai/owner.js `state`); nothing here writes to it.
 
@@ -165,7 +167,10 @@ export function createOwnerMesh(opts = {}) {
     duvet.scale.set(0.4 + 0.6 * cover, 0.55 + 0.45 * cover, 1);
   }
   placeDuvet(1);
-  let model = null, mixer = null, neck = null, headTop = null, arm = null;
+  let model = null, mixer = null, neck = null, headTop = null, arm = null, hips = null;
+  const skin = []; // the model's materials, for fading him
+  const spine = new THREE.Line3(), onSpine = new THREE.Vector3();
+  let seen = 1; // 1 drawn, 0 faded out of the chase camera's way
   const actions = {};
   const weights = { kneel: 0, idle: 1, walk: 0, run: 0, work: 0, punch: 0 };
   let rise = 0, time = 0, lastMotor = 'inBed', punchT = 0;
@@ -179,8 +184,12 @@ export function createOwnerMesh(opts = {}) {
     model.getObjectByName('HeadTop_End').getWorldPosition(top);
     model.scale.setScalar(HEIGHT / top.y);
     model.traverse((o) => {
-      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; }
+      if (!o.isMesh) return;
+      o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+      // Dithered see-through below full opacity (the texture itself is opaque everywhere).
+      for (const m of [o.material].flat()) { m.alphaHash = true; skin.push(m); }
     });
+    hips = model.getObjectByName('Hips');
     neck = model.getObjectByName('Neck');
     arm = ['LeftArm', 'LeftForeArm', 'LeftHand'].map((n) => model.getObjectByName(n));
     headTop = model.getObjectByName('HeadTop_End');
@@ -247,8 +256,10 @@ export function createOwnerMesh(opts = {}) {
     /**
      * @param {number} dt
      * @param {object} s  the owner's `state` from src/ai/owner.js
+     * @param {{near?: THREE.Vector3 | null, cat?: {x: number, y: number, z: number}}} [opts]
+     *   near: the chase camera, cat: where the cat is; he fades when he is in the way between them
      */
-    update(dt, s) {
+    update(dt, s, { near = null, cat = null } = {}) {
       time += dt;
       const m = s.motor;
       const inBed = m === 'inBed';
@@ -338,8 +349,25 @@ export function createOwnerMesh(opts = {}) {
       else headPos.set(pos.x, pos.y + 0.3, pos.z);
       const bob = sleeping ? Math.sin(time * 1.6) * 0.05 : alarmed ? Math.abs(Math.sin(time * 9)) * 0.04 : 0;
       icon.position.set(headPos.x, headPos.y + 0.32 + bob, headPos.z);
-      icon.material.opacity = sleeping ? 0.75 : 1;
       icon.scale.setScalar(alarmed ? 0.4 : 0.3);
+
+      // In the way of the chase camera: within a metre of it (of the line from his hips to the
+      // top of his head) and nearer to it than the cat is. Then he fades out quickly; a fade
+      // that followed the distance would leave him half dithered, which the brush smears into
+      // noise. Beyond the cat (looming over it) he is always drawn. Faded, he stays out of the
+      // AO pass too, whose override material knows nothing of the dithering.
+      let inTheWay = false;
+      if (near && hips && headTop) {
+        hips.getWorldPosition(spine.start);
+        spine.end.copy(headPos);
+        const d = near.distanceTo(spine.closestPointToPoint(near, true, onSpine));
+        inTheWay = d < 1 && (!cat || d < near.distanceTo(cat));
+      }
+      seen = near ? seen + ((inTheWay ? 0 : 1) - seen) * Math.min(1, dt * 10) : 1;
+      for (const mat of skin) mat.opacity = seen;
+      if (model) model.userData.noAO = seen < 0.75;
+      icon.material.opacity = (sleeping ? 0.75 : 1) * seen;
+      icon.visible = seen > 0.05;
     },
   };
 }

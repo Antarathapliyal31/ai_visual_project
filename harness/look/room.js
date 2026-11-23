@@ -447,9 +447,41 @@ export function buildRoom(opts = {}) {
 
   mergeStatic(group);
 
+  // ------------------------------------------- the closed room (chase view)
+  // The overview looks in from the south-east, through two missing walls and
+  // no ceiling. From behind the cat the camera looks every way, so in that
+  // view the room is closed: the east and south walls where the invisible
+  // boundaries stand, their baseboards, and a ceiling. They cast no shadows,
+  // so the light comes in as it does in the overview.
+  const closed = new THREE.Group();
+  closed.userData.dynamic = true;
+  closed.visible = false;
+  for (const id of ['boundaryEast', 'boundarySouth']) {
+    const s = STATIC_BOXES.find((b) => b.id === id);
+    const [w, h, d] = s.half.map((v) => v * 2);
+    const paint = new THREE.MeshStandardMaterial({ map: tex.plaster({ seed: id.length + 3, color: P.wall }), roughness: 0.95 });
+    const cut = mats.plain(P.wallCut, 0.9), back = mats.plain(0x6f6b5e, 0.95);
+    // Inner face: -x for the east wall, -z for the south wall (faces in order +x, -x, +y, -y, +z, -z).
+    const faces = id === 'boundaryEast' ? [back, paint, cut, back, cut, cut] : [cut, cut, cut, back, back, paint];
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), faces);
+    wall.position.set(...s.center);
+    wall.receiveShadow = true;
+    closed.add(wall);
+  }
+  const bbE = new THREE.Mesh(roundedBox(0.025, 0.1, D, 0.006), base);
+  bbE.position.set(ROOM.maxX - 0.0125, 0.05, (ROOM.minZ + ROOM.maxZ) / 2);
+  const bbS = new THREE.Mesh(roundedBox(W, 0.1, 0.025, 0.006), base);
+  bbS.position.set((ROOM.minX + ROOM.maxX) / 2, 0.05, ROOM.maxZ - 0.0125);
+  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(W + 0.4, 0.06, D + 0.4), mats.plain(0xd9d2c1, 0.95));
+  ceiling.position.set((ROOM.minX + ROOM.maxX) / 2, ROOM.wallHeight + 0.03, (ROOM.minZ + ROOM.maxZ) / 2);
+  for (const m of [bbE, bbS, ceiling]) { m.receiveShadow = true; closed.add(m); }
+  group.add(closed);
+
   return {
     group,
     materials: mats,
+    /** Close the room (the chase view) or open it to the overview. */
+    setClosed(on) { closed.visible = on; },
     /** Move what moves by itself (the fish). `t` in seconds. */
     update(t) {
       for (const fn of ctx.animate) fn(t);

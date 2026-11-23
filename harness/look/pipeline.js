@@ -300,6 +300,23 @@ export function createPipeline(renderer, scene, camera, opts = {}) {
       paint.uniforms.fieldScale.value.set(w / 420, h / 420); // the stroke direction turns every few hundred pixels
       paint.uniforms.canvasScale.value.set((w * ratio) / 512, (h * ratio) / 512); // one thread is two device pixels
     },
+    /**
+     * Draw from another camera: the overview's (orthographic) or the chase
+     * camera (perspective). Every pass holds its own; GTAO also compiles its
+     * shaders for one kind of camera, so those are rebuilt on a switch.
+     */
+    setCamera(next) {
+      if (next === camera) return;
+      camera = next;
+      for (const pass of composer.passes) if ('camera' in pass) pass.camera = next;
+      const perspective = next.isPerspectiveCamera ? 1 : 0;
+      for (const m of Object.values(ao)) {
+        if (m?.isShaderMaterial && m.defines && 'PERSPECTIVE_CAMERA' in m.defines && m.defines.PERSPECTIVE_CAMERA !== perspective) {
+          m.defines.PERSPECTIVE_CAMERA = perspective;
+          m.needsUpdate = true;
+        }
+      }
+    },
     setBackdrop(inner, outer) {
       scene.background?.dispose?.();
       scene.background = backdropTexture(inner, outer);

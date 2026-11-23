@@ -25,6 +25,28 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## A camera behind the cat, and calmer controls (Nov 23)
+
+The cat was steered from the fixed overview, and its controls were twitchy: it turned at 3.2 rad/s at once, reached full speed in a tenth of a second and crossed the room in 2 s. Now:
+
+- **A chase camera** (`src/player/chaseCamera.js`): a third-person view, as in a driving game. It sits 1.5 m behind the cat and 0.8 m above it, and swings round behind it as it turns, with a lag (`CHASE.yawRate`). It stays in the room:
+  - a wall or tall furniture behind the cat pulls it in. Low furniture right behind the cat (the desk, the bed) it looks over from higher up. With a wall right behind the cat, it comes in close over the cat's head;
+  - a cat under the bed, the desk or a table is watched from above it, through the cat's see-through silhouette;
+  - it never looks down more steeply than 50°.
+
+  It is headless (plain numbers, no Three.js) and tested in `tests/player/chaseCamera.test.js`.
+- **C** switches between the chase camera and the old overview; the choice is kept in the browser. **H** puts the camera back behind the cat. The menu, pause and end screens show the overview as before.
+- **Calmer controls** (`tuning.cat`):
+  - speed 3.0 → 2.4 m/s (still faster than his chase, 1.9);
+  - turning 3.2 → 2.2 rad/s, easing in and out instead of starting at full rate (`turnAccel` 14 rad/s², `src/player/cat.js`);
+  - full speed in 0.2 s, not 0.1 (`groundAccel` 30 → 12), and a gentler stop (`brakeAccel` 40 → 16).
+- **The room closes up in the chase view** (`look/room.js`, `setClosed`): the two walls the overview cuts away, and a ceiling, are drawn only while the chase camera is on.
+- **The owner fades out of the camera's way** (`look/ownerMesh.js`, dithered with `alphaHash`) when he is within a metre of it and nearer to it than the cat. That happens with the camera over his pillow and the cat under the bed. In front of the cat he is always drawn.
+- **Fixed:** after a room change, the missions plaque could keep showing the previous room's missions. It only redrew when progress changed, and both rooms had none done.
+- **For D:**
+  - `look/pipeline.js` has `setCamera(camera)`, which swaps the camera on every pass, GTAO included;
+  - `play.html` keeps the view in `localStorage` (`loa.view`), and `window.game` has `chaseCam` and `view`.
+
 ## The owner gives up sooner when he can't see the cat (Nov 23)
 
 After one crash, with the cat hidden under the bed, he used to stay up for about a minute: 7 looks round the room and a hiding place checked, then standing by the bed until the wake meter drained to "asleep". Now he is back asleep in about 23 s (measured, same crash):
@@ -289,7 +311,7 @@ I reviewed everything merged into `main` on Oct 22 (Rushi's and Christina's work
 
 ## Tech stack
 
-- **Three.js** (WebGL) for rendering, fixed isometric camera, shadow maps
+- **Three.js** (WebGL) for rendering, a third-person chase camera and an isometric overview, shadow maps
 - **cannon-es** for rigid-body integration, the narrow phase and the contact equations; our own warm-started Gauss-Seidel pass solves them
 - **Vite** for the dev build; **JavaScript ES modules**; plain HTML/CSS for the HUD
 - **Vitest** for headless unit tests of the proofs
@@ -332,8 +354,10 @@ npm run test:watch  # test in watch mode
 - **Left / A** — turn left
 - **Right / D** — turn right
 - **Space** — jump
-- **Right-drag** the view — orbit camera
-- **Scroll** — zoom
+- **C** — camera: behind the cat, or the whole room
+- **H** — camera back behind the cat (in the whole-room view, re-centres it)
+- **Right-drag** the view — orbit camera (whole-room view)
+- **Scroll** — zoom (whole-room view)
 - Objects fall only when the cat physically collides with them
 
 The HUD shows FPS, active body count, the three mid-term test readouts, the wake meter, and the owner's current stage.

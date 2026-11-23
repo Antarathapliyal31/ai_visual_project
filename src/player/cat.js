@@ -109,6 +109,7 @@ export function createCat(physics, opts = {}) {
     respawns: 0,        // times it fell out of the world and was put back where it stood
   };
   let heading = 0;
+  let spin = 0; // rad/s it is turning at now: car-style turning eases towards the key's rate
   let jumpBuffer = 0, jumpLock = 0;
   let prevJump = false, prevSwat = false;
   let fallSpeed = 0;
@@ -134,6 +135,7 @@ export function createCat(physics, opts = {}) {
     body.position.set(p.x, p.y, p.z);
     body.velocity.set(0, 0, 0);
     heading = wrapAngle(newHeading);
+    spin = 0;
     syncOrientation();
     body.updateAABB();
     world.broadphase.invalidate?.(); // the grid re-bins before the next ray
@@ -294,8 +296,13 @@ export function createCat(physics, opts = {}) {
         omega = clamp(diff, -maxTurn, maxTurn) / dt;
         drive = mag * Math.max(0, Math.cos(diff)); // don't run sideways while still turning
       }
+      spin = omega;
     } else {
-      omega = clamp(input.turn, -1, 1) * cfg.turnRate;
+      // Ease into and out of a turn, so it doesn't snap round (or swing the chase camera).
+      const want = clamp(input.turn, -1, 1) * cfg.turnRate;
+      const most = (cfg.turnAccel ?? Infinity) * dt;
+      spin += clamp(want - spin, -most, most);
+      omega = spin;
       drive = clamp(input.forward, -1, 1);
       if (drive < 0) drive *= cfg.reverseFactor;
     }

@@ -170,7 +170,7 @@
 
 <div id="hint" class="plaque">
   <span><kbd>W</kbd><kbd>S</kbd> walk</span><span><kbd>A</kbd><kbd>D</kbd> turn</span><span><kbd>Space</kbd> jump</span><span><kbd>J</kbd> swat</span>
-  <span><kbd>Esc</kbd> pause</span><span><kbd>N</kbd> 3 a.m.</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span id="fps"></span>
+  <span><kbd>Esc</kbd> pause</span><span><kbd>C</kbd> camera</span><span><kbd>N</kbd> 3 a.m.</span><span><kbd>B</kbd> brush</span><span><kbd>P</kbd> plain render</span><span id="fps"></span>
 </div>
 
 <div class="screen" id="menu">
@@ -184,6 +184,7 @@
       <span><kbd>Space</kbd></span><span>jump onto things</span>
       <span><kbd>J</kbd></span><span>swat what's in front</span>
       <span><kbd>Esc</kbd></span><span>pause</span>
+      <span><kbd>C</kbd></span><span>behind the cat / whole room</span>
     </div>
     <div class="tiers" id="tiers" role="group" aria-label="Difficulty"></div>
     <div class="roomCard">
@@ -260,6 +261,7 @@ import { createRound } from '../src/core/round.js';
 import { ROOM, hidingSpotAt } from '../src/collision/index.js';
 import { createPhysicsWorld } from '../src/physics/index.js';
 import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
+import { createChaseCamera } from '../src/player/chaseCamera.js';
 import { createNoise } from '../src/noise/index.js';
 import { createOwner } from '../src/ai/index.js';
 import { LEVELS, loadLevel, INVENTORY } from '../src/levels/index.js';
@@ -353,6 +355,28 @@ controls.maxPolarAngle = 1.12;
 
 const pipeline = createPipeline(renderer, scene, camera);
 
+// The chase camera: behind the cat, swinging round behind it as it turns.
+// C switches between it and the overview (the whole room, above); menus,
+// pause and the end screen always show the overview.
+const chaseCam = new THREE.PerspectiveCamera(60, 1, 0.05, 40);
+let chase = null; // the rig for the current room (src/player/chaseCamera.js)
+let view = (() => { try { return JSON.parse(localStorage.getItem('loa.view')) === 'overview' ? 'overview' : 'chase'; } catch { return 'chase'; } })();
+const chasing = () => view === 'chase' && document.body.dataset.screen === 'play';
+/** Draw from the camera the moment calls for, with the room closed round the chase camera. */
+function useView() {
+  const on = chasing() && chase;
+  pipeline.setCamera(on ? chaseCam : camera);
+  room?.setClosed(Boolean(on));
+  controls.enabled = !on;
+}
+/** Put the chase camera straight behind the cat. */
+function snapChase() {
+  if (!chase || !cat) return;
+  const { position, target } = chase.snap(cat);
+  chaseCam.position.set(position.x, position.y, position.z);
+  chaseCam.lookAt(target.x, target.y, target.z);
+}
+
 function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
   renderer.setSize(w, h, false);
@@ -366,6 +390,8 @@ function resize() {
   camera.top = height / 2; camera.bottom = -height / 2;
   camera.left = (-height * aspect) / 2; camera.right = (height * aspect) / 2;
   camera.updateProjectionMatrix();
+  chaseCam.aspect = aspect;
+  chaseCam.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
 resize();
@@ -418,6 +444,7 @@ function switchRoom() {
   scene.add(room.group);
   ownerLook.setHome(level.legacy ? null : level.home);
   setNight(night); // the window, the aquarium and the environment on the new room
+  useView();
 }
 // Thrown-away meshes are released after the next frame has drawn: by then the
 // new round's materials hold the same shader programs, so none is freed and
@@ -500,6 +527,7 @@ function newWorld() {
   tracker = createMissionTracker(missions, contents);
   goalCheered = false;
   cat = createCat(physics, { position: level.cat.position, heading: level.cat.heading }); // facing the viewer
+  chase = createChaseCamera({ boxes: level.boxes, room: ROOM });
   catMesh = createCatMesh(cat.dims, lookNow());
   applyEnvironment(catMesh.group, lights.mood.env);
   scene.add(catMesh.group);
@@ -534,6 +562,7 @@ const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStar
 function show(screen) {
   for (const id of ['menu', 'pause', 'end']) $(id).hidden = id !== screen;
   document.body.dataset.screen = screen ?? 'play';
+  useView();
   const primary = { menu: 'playBtn', pause: 'resumeBtn', end: 'againBtn' }[screen];
   if (primary) $(primary).focus();
   else document.activeElement?.blur?.();
@@ -682,6 +711,7 @@ function play() {
   round.start({ goal });
   keys.clear();
   homeCamera();
+  snapChase();
   show(null);
 }
 function toMenu() {
@@ -781,7 +811,14 @@ addEventListener('keydown', (e) => {
   if (CAT_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'KeyN') setNight(!night);
   if (e.code === 'KeyR') play();
-  if (e.code === 'KeyH') homeCamera();
+  if (e.code === 'KeyH') { if (chasing()) snapChase(); else homeCamera(); }
+  if (e.code === 'KeyC') {
+    view = view === 'chase' ? 'overview' : 'chase';
+    try { localStorage.setItem('loa.view', JSON.stringify(view)); } catch {}
+    if (view === 'chase') snapChase();
+    useView();
+    toast(view === 'chase' ? 'Camera: behind the cat' : 'Camera: the whole room');
+  }
   if (e.code === 'KeyP') { pipeline.enabled = !pipeline.enabled; toast(pipeline.enabled ? 'Full lighting' : 'Plain render'); }
   if (e.code === 'KeyB') { pipeline.paint.enabled = !pipeline.paint.enabled; toast(pipeline.paint.enabled ? 'Painted' : 'Unpainted'); }
 });
@@ -823,7 +860,8 @@ function hud() {
   $('goalFill').style.width = `${(share * 100).toFixed(1)}%`;
   $('goalMeter').classList.toggle('reached', share >= 1);
   const list = tracker.list();
-  const key = JSON.stringify(list.map((m) => [m.progress, m.done]));
+  // The words too: another room's missions can be just as far along (none done), and must still be drawn.
+  const key = JSON.stringify(list.map((m) => [m.title, m.text, m.progress, m.need, m.done]));
   if (key !== shownMissions) {
     shownMissions = key;
     $('missionsHud').replaceChildren(...list.map((m) => {
@@ -897,13 +935,20 @@ function frame(dt) {
     if (!live.has(body)) { scene.remove(mesh); releaseLater(mesh); views.delete(body); }
   }
 
+  // The chase camera swings round behind the cat.
+  const chased = chasing() && chase;
+  if (chased) {
+    const { position, target } = chase.update(dt, cat);
+    chaseCam.position.set(position.x, position.y, position.z);
+    chaseCam.lookAt(target.x, target.y, target.z);
+  }
   const still = round.state === 'paused' ? 0 : dt;
   catMesh.update(still, cat, { low: hidingSpotAt(cat.body.position, level.hidingVolumes) !== null });
-  ownerLook.update(still, owner.state);
+  // He fades out of the chase camera's way (over his pillow, with the cat under the bed).
+  ownerLook.update(still, owner.state, { near: chased ? chaseCam.position : null, cat: cat.body.position });
   room.update((sceneTime += dt));
   updateRings(still);
-
-  // The view drifts most of the way with the cat, so a close view never loses it.
+  // The overview drifts most of the way with the cat, so a close view never loses it.
   follow.set(cat.body.position.x * FOLLOW, Math.max(0, cat.body.position.y - cat.dims.radius) * 0.35, cat.body.position.z * FOLLOW).sub(followed);
   follow.multiplyScalar(Math.min(1, dt * 3.5));
   camera.position.add(follow);
@@ -995,6 +1040,7 @@ window.game = {
   round, keys, camera, controls, renderer, scene,
   frame, play, toMenu, pause, resume, setNight, homeCamera, selectTier, anotherRoom, nextRound,
   setRoom: (id) => setRoom(byId(id)),
+  chaseCam, get view() { return view; },
   setLook,
   get goal() { return goal; }, get missions() { return tracker?.list(); }, get stars() { return stars(); },
   get level() { return level; }, get room() { return room; }, get tier() { return tier; }, get played() { return played; },

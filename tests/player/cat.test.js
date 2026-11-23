@@ -92,9 +92,11 @@ describe('cat movement', () => {
     expect(cat.state.speed).toBeCloseTo(tuning.cat.speed, 2);
     expect(cat.body.velocity.z).toBeCloseTo(-tuning.cat.speed, 2); // heading north = -z
     expect(Math.abs(cat.body.velocity.x)).toBeLessThan(1e-6);
-    expect(cat.body.position.z).toBeLessThan(1 - 1.2);
+    // Up to speed in speed / groundAccel seconds, then steady: at least 90% of that distance.
+    const { speed, groundAccel, brakeAccel } = tuning.cat;
+    expect(cat.body.position.z).toBeLessThan(1 - 0.9 * speed * (0.5 - speed / (2 * groundAccel)));
     cat.setInput({ forward: 0 });
-    run(0.15);
+    run(speed / brakeAccel + 0.05); // it glides to a stop
     expect(cat.state.speed).toBeLessThan(0.01);
     const z = cat.body.position.z;
     run(0.5);
@@ -123,15 +125,20 @@ describe('cat movement', () => {
     expect(cat.body.velocity.z).toBeGreaterThan(0); // backing away from the wall it faces
   });
 
-  it('heading 0 faces +x and turning left raises it', () => {
+  it('heading 0 faces +x and turning left raises it, easing in rather than snapping', () => {
     const { cat, run } = setup({ cat: { heading: 0, position: [0, FLOOR_Y, 1] } });
+    const { turnRate, turnAccel } = tuning.cat;
     expect(cat.forward()).toMatchObject({ x: 1, y: 0 });
     cat.setInput({ turn: 1 });
+    run(1 / 120);
+    expect(cat.heading).toBeCloseTo(turnAccel / 120 / 120, 6); // the first step turns at turnAccel * dt, not the full rate
+    run(0.5 - 1 / 120);
+    // Up to full rate in turnRate / turnAccel seconds, then steady: half a second turns
+    // the full-rate angle less what the ease-in gave up.
+    expect(cat.heading).toBeCloseTo(turnRate * 0.5 - (turnRate * turnRate) / (2 * turnAccel), 1);
+    const before = cat.heading;
     run(0.25);
-    expect(cat.heading).toBeCloseTo(tuning.cat.turnRate * 0.25, 6);
-    cat.setInput({ turn: -1 });
-    run(0.5);
-    expect(cat.heading).toBeCloseTo(-tuning.cat.turnRate * 0.25, 6);
+    expect(cat.heading - before).toBeCloseTo(turnRate * 0.25, 2); // steady now
     expect(cat.body.position.x).toBeCloseTo(0, 4); // turning on the spot
   });
 
@@ -677,7 +684,7 @@ describe('keyboard mapping', () => {
     const { cat, run } = setup();
     cat.setInput(inputFromKeys(new Set(['KeyW'])));
     run(0.5);
-    expect(cat.body.position.z).toBeLessThan(0);
+    expect(cat.body.position.z).toBeLessThan(0.5); // half a metre forward (north) from z = 1
   });
 });
 
