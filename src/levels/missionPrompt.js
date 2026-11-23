@@ -37,14 +37,14 @@ export const MISSIONS_SCHEMA = {
 
 /** The standing instructions: the game, the mission kinds, what makes a good one. */
 export function missionsSystemPrompt() {
-  return `You write missions for rooms in Last One Awake, a small stealth game. The player is a cat loose in a flat at 3 a.m. It knocks things over and breaks plates and mugs before dawn, while the noise wakes its owner: he sits up, gets up, walks over to look, and crouches to look into hiding places. To win a night the cat must make enough chaos (the room's goal) and not be caught before dawn. Each room also has two missions: jobs that earn a star each on a night the cat wins.
+  return `You write missions for rooms in Last One Awake, a small stealth game. The player is a cat loose in a flat at 3 a.m. It knocks things over and breaks plates and mugs before dawn, while the noise wakes its owner: he sits up, gets up and walks over to look. He never looks under things, so a cat that makes it into a hiding place is safe there. To win a night the cat must make enough chaos (the room's goal) and not be caught before dawn. Each room also has two missions: jobs that earn a star each on a night the cat wins.
 
 ## The kinds of mission
 
 - break: break "count" plates or mugs ("kind": plate, mug, or any for either), from one "piece" or "anywhere".
 - knock: knock "count" props of one "kind" over, off one "piece" or "anywhere". Kinds: ${Object.entries(KIND_NAMES).map(([k, [name]]) => `${k} (${name})`).join(', ')}.
 - clear: knock everything off one "piece" (only a piece with ${MAX_CLEAR} things or fewer on it).
-- hide: stay in a hiding place ("spot") while he crouches and looks into it, without him seeing the cat. Only the hiding places he can't see into count; each room lists its own.
+- hide: stay in a hiding place ("spot") while he is right next to it (within a metre), without him seeing the cat. Only the hiding places he can't see into count; each room lists its own.
 - sneak: get within a metre of him while he is up, without being seen.
 
 ## Good missions
@@ -76,8 +76,8 @@ export function missionsPrompt({ spec, contents, safeSpots, goal }) {
   }
   const spots = [...new Set(safeSpots.map((s) => s.split('#')[0]))].filter((s) => SPOTS[s]);
   lines.push('', spots.length
-    ? `Hiding places he can't see into, even crouching: ${spots.map((s) => `${SPOTS[s]} (${s})`).join(', ')}.`
-    : 'There is no hiding place here he can\'t see into when he crouches, so no "hide" mission.');
+    ? `Hiding places he can't see into: ${spots.map((s) => `${SPOTS[s]} (${s})`).join(', ')}.`
+    : 'There is no hiding place here he can\'t see into, so no "hide" mission.');
   lines.push('', 'Write its two missions.');
   return lines.join('\n');
 }

@@ -1,5 +1,7 @@
 // The owner (C): wakes in stages from the noise, gets out of bed, searches,
-// checks hiding spots, chases the cat and catches it.
+// chases the cat and catches it. He doesn't look under things: a cat that has
+// made it into a hiding place is safe there (tuning.owner.looksUnder turns
+// Christina's hiding-spot checks, below, back on).
 //
 // Built around Christina's state machine and behaviour tree
 // (ownerStateMachine.js, behaviorTree.js), which turn the wake level and the
@@ -13,8 +15,8 @@
 //    (navigation.js) as a kinematic body, so props and the cat are pushed
 //    aside but nothing static is walked through.
 //  - search: walk to the noise, look around, then sweep that part of the room
-//    (Antara's search anchors, nearest first), then check the hiding spot
-//    nearest to it. checkHidingSpot: crouch at the spot's check point and look
+//    (Antara's search anchors, nearest first), then (with looksUnder) check the
+//    hiding spot nearest to it. checkHidingSpot: crouch at the spot's check point and look
 //    in with a low eye (A's hiding volumes); the bed skirt still hides a cat
 //    under the bed, the desk does not. returnToBed: walk back and wait by the
 //    bed until the wake meter has calmed down, then lie down.
@@ -168,9 +170,11 @@ export function createOwner(physics, opts) {
 
   /**
    * The hiding spot whose check point is nearest p, skipping the ones checked
-   * already. With only a noise to go on he looks only right by it.
+   * already. With only a noise to go on he looks only right by it. None at all
+   * unless he looks under things (tuning.owner.looksUnder, off by default).
    */
   function nearestSpot(p, within = Infinity) {
+    if (!cfg.looksUnder) return null;
     let best = null, bestD = state.sawCat ? within : Math.min(within, cfg.checkNearNoise ?? within);
     for (const v of volumes) {
       if (state.checked.has(v.id)) continue;

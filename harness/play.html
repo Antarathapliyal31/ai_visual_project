@@ -284,6 +284,13 @@ const STARS_KEY = 'loa.stars', COAT_KEY = 'loa.coat', COLLAR_KEY = 'loa.collar';
 const stored = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
 const store = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
 
+// Trying the controls' feel without a code change: ?turn=1.2 sets how fast the cat
+// turns (rad/s, tuning.cat.turnRate), ?speed=1.8 its top speed (m/s).
+for (const [key, field, lo, hi] of [['turn', 'turnRate', 0.5, 4], ['speed', 'speed', 0.8, 4]]) {
+  const v = Number(new URLSearchParams(location.search).get(key));
+  if (v) tuning.cat[field] = Math.min(hi, Math.max(lo, v));
+}
+
 // --------------------------------------------------------------- stars
 // A room keeps its best stars (one for winning the night, one per mission done);
 // the total opens the harder rooms and the cat's looks. ?unlock=all opens everything.

@@ -19,8 +19,7 @@ import { freshTuning } from '../helpers/tuning.js';
 const R = tuning.cat.radius;
 
 /** A round on a level, as play.html builds it, without the look. */
-function setup(level, { catAt } = {}) {
-  const t = freshTuning();
+function setup(level, { catAt, t = freshTuning() } = {}) {
   const physics = createPhysicsWorld({ tuning: t, room: { boxes: level.boxes, occluders: level.occluders } });
   level.spawnProps(physics);
   const cat = createCat(physics, { position: catAt ?? level.cat.position, heading: level.cat.heading });
@@ -75,7 +74,7 @@ describe('the level list', () => {
 
 describe('playing a designed level', () => {
   for (const spec of ROOMS) {
-    it(`${spec.id}: he gets up at his own bed, checks a hiding place and goes back to bed`, () => {
+    it(`${spec.id}: he gets up at his own bed, looks round by a hiding place without looking under it, and goes back to bed`, () => {
       const level = loadLevel(spec);
       const bed = level.hidingVolumes.find((h) => h.id === 'underBed');
       const s = setup(level, { catAt: [(bed.min[0] + bed.max[0]) / 2, R + 0.001, (bed.min[2] + bed.max[2]) / 2] });
@@ -85,7 +84,8 @@ describe('playing a designed level', () => {
       s.run(tuning.owner.getUpTime + 0.2);
       expect(Math.hypot(s.owner.state.x - level.home.bedside.x, s.owner.state.z - level.home.bedside.z)).toBeLessThan(0.3);
 
-      // A sound right by a hiding place that is not the bed: he walks over, looks, crouches.
+      // A sound right by a hiding place that is not the bed: he walks over and looks round, but
+      // doesn't crouch to look into it (tuning.owner.looksUnder is off).
       const v = level.hidingVolumes.find((h) => h.id !== 'underBed');
       const at = { x: (v.min[0] + v.max[0]) / 2, z: (v.min[2] + v.max[2]) / 2 };
       s.sound(at, 0.8);
@@ -95,7 +95,7 @@ describe('playing a designed level', () => {
         if (s.owner.isUp) for (const b of solid) if (inside(p, b)) throw new Error(`he walked into ${b.id} at ${p.x.toFixed(2)}, ${p.z.toFixed(2)}`);
         if (s.owner.state.motor === 'crouching') checked.add(s.owner.state.spot.id);
       });
-      expect(checked.size).toBeGreaterThan(0);
+      expect(checked.size).toBe(0);
       // Then it is quiet; he goes back to bed.
       s.run(60, () => s.owner.state.motor !== 'inBed');
       expect(s.owner.state.motor).toBe('inBed');
@@ -133,15 +133,27 @@ describe('playing a designed level', () => {
     }
   });
 
-  it('he comes to the table, crouches to look under it, and does not catch the cat there', () => {
+  // A noise right by the dining table, the cat under it near the edge, not tucked in the middle.
+  const atTheTable = (t) => {
     const party = loadLevel(EXAMPLE_LEVELS.find((l) => l.id === 'dinner-party'));
     const v = party.hidingVolumes.find((h) => h.id === 'underTable');
-    const at = { x: v.max[0] - 0.15, z: (v.min[2] + v.max[2]) / 2 }; // near the edge, not tucked in the middle
-    const s = setup(party, { catAt: [at.x, R + 0.001, at.z] });
+    const at = { x: v.max[0] - 0.15, z: (v.min[2] + v.max[2]) / 2 };
+    const s = setup(party, { catAt: [at.x, R + 0.001, at.z], t });
     s.noise.meter.raise(0.85);
     s.sound(at, 0.9);
     const checked = new Set();
     s.run(45, () => { if (s.owner.state.motor === 'crouching') checked.add(s.owner.state.spot.id); });
+    return { s, checked };
+  };
+
+  it('he comes to the table, looks round without looking under it, and does not catch the cat there', () => {
+    const { s, checked } = atTheTable();
+    expect(checked.size).toBe(0);
+    expect(s.caught).toHaveLength(0);
+  });
+
+  it('with looksUnder on, he crouches to look under the table, and still does not catch the cat there', () => {
+    const { s, checked } = atTheTable(freshTuning((t) => { t.owner.looksUnder = true; }));
     expect(checked.has('underTable')).toBe(true);
     expect(s.caught).toHaveLength(0);
   });

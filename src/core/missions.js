@@ -7,7 +7,7 @@
 //   break   break N plates or mugs (from one piece, or anywhere)
 //   knock   knock N props of a kind over (off one piece, or anywhere)
 //   clear   knock everything off one piece
-//   hide    stay in a hiding place while he crouches and looks into it
+//   hide    stay in a hiding place while he is right next to it
 //   sneak   get within a metre of him while he is up, without being seen
 //
 // A mission is data; its text comes from the data (describe), so what the
@@ -24,6 +24,7 @@ import { hidingSpotAt } from '../collision/index.js';
 export const MISSION_TYPES = ['break', 'knock', 'clear', 'hide', 'sneak'];
 export const BREAKABLE = ['plate', 'mug'];
 export const SNEAK_DISTANCE = 1.0; // m
+export const BESIDE_DISTANCE = 1.0; // m from a hiding place's edge: he is right next to it
 export const MAX_CLEAR = 8;        // most props on a piece a 'clear' mission may ask for
 
 /** What the player calls each kind of prop: one, many. */
@@ -32,7 +33,11 @@ export const KIND_NAMES = {
   pot: ['plant', 'plants'], clock: ['alarm clock', 'alarm clocks'], monitor: ['monitor', 'monitors'],
   keyboard: ['keyboard', 'keyboards'], pillow: ['cushion', 'cushions'], ball: ['ball of yarn', 'balls of yarn'],
 };
-/** Where a 'hide' mission can be done: the hiding places he can't see into even crouching. */
+/**
+ * Where a 'hide' mission can be done: the hiding places he couldn't see into
+ * even if he crouched to look (validate.js safeSpotIds), so the cat is safe
+ * there however close he comes.
+ */
 export const SPOTS = { underBed: 'under the bed', underTable: 'under the dining table', underArmchair: 'under an armchair', any: 'in a hiding place' };
 
 const PIECE_NAMES = { windowSill: 'window sill' };
@@ -73,7 +78,14 @@ export function contentsOf(level, props) {
   const count = (kind, piece) => list.filter((p) =>
     (kind == null || (kind === 'breakable' ? BREAKABLE.includes(p.kind) : p.kind === kind)) && (!piece || p.piece === piece)).length;
   const onPieces = new Set(list.map((p) => p.piece).filter(Boolean));
-  return { props: list, count, onPieces };
+  return { props: list, count, onPieces, spots: level.hidingVolumes ?? [] };
+}
+
+/** Is someone at (x, z) within BESIDE_DISTANCE of the edge of hiding place v? */
+function besideSpot(at, v) {
+  const dx = Math.max(v.min[0] - at.x, 0, at.x - v.max[0]);
+  const dz = Math.max(v.min[2] - at.z, 0, at.z - v.max[2]);
+  return Math.hypot(dx, dz) <= BESIDE_DISTANCE;
 }
 
 /** The chaos it takes to win a night in this room: a share of all it could make. */
@@ -102,7 +114,7 @@ export function describe(m) {
       return `Knock ${m.count} ${many} ${piece ? `off the ${piece}` : 'over'}`;
     }
     case 'clear': return `Clear everything off the ${piece}`;
-    case 'hide': return m.spot === 'any' ? 'Stay hidden while he checks your hiding place' : `Stay ${SPOTS[m.spot]} while he looks there`;
+    case 'hide': return m.spot === 'any' ? "Stay hidden while he's right next to your hiding place" : `Stay ${SPOTS[m.spot]} while he's right next to it`;
     case 'sneak': return 'Get within a metre of him while he is up, without being seen';
     default: return 'Unknown mission';
   }
@@ -204,10 +216,12 @@ export function createMissionTracker(missions, contents) {
       else if (m.type === 'knock') s.progress = contents.props.filter((p) => matches(p, m) && knocked.has(p.body)).length;
       else if (m.type === 'clear') s.progress = contents.props.filter((p) => p.piece === m.piece && knocked.has(p.body)).length;
       else if (m.type === 'hide') {
-        // Done once he has crouched to look into the spot and got up again without seeing the cat in it.
+        // Done once he has been right next to the spot, up and about, with the cat in it unseen,
+        // and has moved off again without catching it. (The cat must still be in it as he goes.)
         const st = owner?.state;
-        if (st?.motor === 'crouching' && st.spot && (m.spot === 'any' || base(st.spot.id) === m.spot)) {
-          s.pending = Boolean(catAt && hidingSpotAt(catAt, [st.spot]) && !st.seesCat);
+        const beside = owner?.isUp && st ? contents.spots.filter((v) => (m.spot === 'any' || base(v.id) === m.spot) && besideSpot(st, v)) : [];
+        if (beside.length) {
+          s.pending = Boolean(catAt && hidingSpotAt(catAt, beside) && !st.seesCat);
         } else if (s.pending) {
           if (!st?.caught) s.progress = 1;
           s.pending = false;

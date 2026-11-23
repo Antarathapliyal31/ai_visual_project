@@ -98,13 +98,14 @@ export const tuning = {
     mass: 3.0,               // kg
     radius: 0.12,            // m; collider is 2r = 24 cm tall, under the 26 cm desk gap
     bodyHalfLength: 0.10,    // m; two spheres at +-this along the heading (0 = one sphere)
-    speed: 2.4,              // m/s forward (still outruns his chase, 1.9)
+    speed: 2.0,              // m/s forward (still outruns his chase, 1.6)
     reverseFactor: 0.6,      // backing up is slower
-    turnRate: 2.2,           // rad/s, car-style turning
-    turnAccel: 14,           // rad/s^2: turning eases in and out (full rate in ~0.15 s) rather than snapping
+    turnRate: 1.5,           // rad/s (86 degrees a second), car-style turning; the chase camera swings round with it
+    turnAccel: 6,            // rad/s^2: a turn builds up (full rate in 0.25 s), so a tap turns a few degrees, not a lurch...
+    turnStop: 15,            // rad/s^2: ...and stops within 0.1 s of letting go, without drifting on
     moveTurnRate: 8,         // rad/s when steering by a world direction (camera-relative input)
-    groundAccel: 12,         // m/s^2 towards the target velocity on the ground (full speed in 0.2 s)
-    brakeAccel: 16,          // m/s^2 with no input on the ground: it glides to a stop
+    groundAccel: 8,          // m/s^2 towards the target velocity on the ground (full speed in 0.25 s)
+    brakeAccel: 16,          // m/s^2 with no input on the ground: stops in an eighth of a second
     airAccel: 8,             // m/s^2 of air control
     jumpHeight: 1.1,         // m apex; the desk top is at 0.94
     coyoteTime: 0.08,        // s after leaving a ledge when a jump still counts
@@ -152,14 +153,16 @@ export const tuning = {
     sitEyeHeight: 1.4,       // m sitting up in bed (the mattress is 72 cm up)
     crouchEyeHeight: 0.2,    // m when he crouches to look into a hiding spot
     walkSpeed: 1.1,          // m/s
-    chaseSpeed: 1.9,         // m/s once he has seen the cat
+    chaseSpeed: 1.6,         // m/s once he has seen the cat (the cat runs at 2.0)
     turnRate: 4.0,           // rad/s
     getUpTime: 1.4,          // s from sitting in bed to standing beside it
     lieDownTime: 1.6,        // s
     scanTime: 2.5,           // s he looks around where the noise was
     sweepPoints: 2,          // search anchors he also checks round a noise or a lost cat (Antara's)
-    crouchTime: 1.6,         // s he looks into a hiding spot
-    checkNearNoise: 1.5,     // m; with only a noise to go on (no sight of the cat), he looks into a hiding spot only this close to it
+    looksUnder: false,       // crouch to look into hiding places (Christina's checkHidingSpot)? Off since Nov 23, at Rushi's
+                             // call: a cat that has made it under the bed, the desk or a table is safe there
+    crouchTime: 1.6,         // s he looks into a hiding spot (with looksUnder)
+    checkNearNoise: 1.5,     // m; with looksUnder and only a noise to go on, he looks into a hiding spot only this close to it
     settleAfter: 2.0,        // s without seeing the cat before he gives up at the bedside and lies down
     settleWake: 0.4,         // wake he settles to as he lies back down: drowsy, drifting off
     visionRange: 5.5,        // m

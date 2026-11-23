@@ -11,6 +11,8 @@ const R = tuning.cat.radius;
 const UNDER_BED = [-2.4, R + 0.001, -0.1];
 const UNDER_DESK = [0.3, R + 0.001, -2.6];
 const OPEN_FLOOR = [1.0, R + 0.001, 1.2];
+/** Tuning with Christina's hiding-spot checks back on: he crouches to look under things. */
+const looksUnder = () => freshTuning((t) => { t.owner.looksUnder = true; });
 
 function setup({ catAt = UNDER_BED, catHeading = 0, t = freshTuning() } = {}) {
   const physics = createPhysicsWorld({ tuning: t });
@@ -156,19 +158,31 @@ describe('owner up and about', () => {
     expect(crouched).toEqual([]);
   });
 
-  it('once he has seen the cat and lost it, he searches harder: hiding places further off, and a sweep', () => {
-    const s = setup({ catAt: [-1.0, R + 0.001, -1.3] }); // in front of the bed, where he'll see it as he gets up
+  /** He sees the cat as he gets up, then it dashes under the bed, out of sight: what he does next. */
+  const lostUnderTheBed = (t) => {
+    const s = setup({ catAt: [-1.0, R + 0.001, -1.3], t }); // in front of the bed, where he'll see it as he gets up
     s.noise.meter.raise(0.8);
     s.run(8, () => !s.owner.state.seesCat);
     expect(s.owner.state.seesCat).toBe(true);
-    s.cat.teleport(UNDER_BED); // and it dashes under the bed, out of sight
+    s.cat.teleport(UNDER_BED);
     let crouchedAt = null, planned = 0;
     s.run(30, () => {
       if (s.owner.state.motor === 'crouching') crouchedAt ??= s.owner.state.spot.id;
       planned = Math.max(planned, s.owner.state.route.length);
     });
-    expect(crouchedAt).toBe('underBed'); // he looks under the bed after it, though the skirt hides it
-    expect(planned).toBeGreaterThanOrEqual(1); // and lines up places to look round there
+    return { s, crouchedAt, planned };
+  };
+
+  it('once he has seen the cat and lost it, he searches harder (a sweep of that part of the room) but never looks under things', () => {
+    const { s, crouchedAt, planned } = lostUnderTheBed();
+    expect(planned).toBeGreaterThanOrEqual(1); // he lines up places to look round there
+    expect(crouchedAt).toBe(null); // and doesn't look under the bed after it
+    expect(s.caught).toHaveLength(0);
+  });
+
+  it('with looksUnder on, he also looks under the bed after the cat (the skirt still hides it)', () => {
+    const { s, crouchedAt } = lostUnderTheBed(looksUnder());
+    expect(crouchedAt).toBe('underBed');
     expect(s.caught).toHaveLength(0);
   });
 
@@ -195,8 +209,8 @@ describe('owner and the cat', () => {
     expect(s.owner.state.motor).toBe('caught');
   });
 
-  it('never sees a cat under the bed, even when he looks there', () => {
-    const s = setup({ catAt: UNDER_BED });
+  it('with looksUnder on, never sees a cat under the bed, even when he crouches to look', () => {
+    const s = setup({ catAt: UNDER_BED, t: looksUnder() });
     expect(hidingSpotAt(s.cat.body.position)?.id).toBe('underBed');
     s.noise.meter.raise(0.8);
     s.sound([-1.2, 0.3]); // by the foot of the bed
@@ -206,8 +220,22 @@ describe('owner and the cat', () => {
     expect(s.caught).toHaveLength(0);
   });
 
-  it('finds a cat under the desk when he crouches to look', () => {
+  it('leaves a cat under the desk alone: he looks round in front of it but never under it', () => {
     const s = setup({ catAt: UNDER_DESK });
+    s.noise.meter.raise(0.8);
+    s.sound([0.3, -1.3]); // in front of the desk
+    let crouched = false, scanned = false;
+    s.run(25, () => {
+      if (s.owner.state.motor === 'crouching') crouched = true;
+      if (s.owner.state.motor === 'scanning') scanned = true;
+    });
+    expect(scanned).toBe(true);
+    expect(crouched).toBe(false);
+    expect(s.caught).toHaveLength(0);
+  });
+
+  it('with looksUnder on, finds a cat under the desk when he crouches to look', () => {
+    const s = setup({ catAt: UNDER_DESK, t: looksUnder() });
     expect(hidingSpotAt(s.cat.body.position)?.id).toBe('underDesk');
     s.noise.meter.raise(0.8);
     s.sound([0.3, -1.3]); // in front of the desk

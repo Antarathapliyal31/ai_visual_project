@@ -25,6 +25,20 @@ If you joined the team mid-week, read those two docs before writing any code.
 
 ---
 
+## The owner doesn't look under things, and calmer controls again (Nov 23)
+
+The owner shouldn't search under things for the cat, and the controls were still too sensitive. Now:
+
+- **He never looks under things** (`tuning.owner.looksUnder`, off). He still gets up, walks to a noise and looks round, sweeps that part of the room once he has seen the cat, and chases a cat he can see. But a cat that has made it under the bed, the desk or a table is safe there. Christina's hiding-spot checks (crouch at the spot and look in) are still in `src/ai/owner.js` behind the switch, and still tested with it on.
+- **"Hide" missions** now mean staying in the hiding place while he is right next to it (up and about, within a metre of its edge), until he moves off without catching the cat: "Stay under the bed while he's right next to it". The missions in `src/levels/missions.js` don't change, because their words come from the data. The prompt for new missions says the same.
+- **Calmer controls** (`tuning.cat`):
+  - turning 2.2 → 1.5 rad/s (86° a second). It builds up over a quarter of a second (`turnAccel` 6), so a tap turns only a few degrees. It stops within a tenth of a second of letting go (`turnStop` 15, new), so it doesn't drift on;
+  - speed 2.4 → 2.0 m/s, reached in a quarter of a second (`groundAccel` 8). His chase drops from 1.9 to 1.6 m/s, so the cat still outruns him.
+- **Trying other numbers:** `harness/play.html?turn=1.2&speed=1.8` sets the turn rate (rad/s) and top speed (m/s) without a code change.
+- **Still to decide:** the rooms' difficulty scores (`validate.js`) still count the hiding places he couldn't see into even crouching. Now that he doesn't look under things, every hiding place is safe, so rooms play a little easier than their tier says. Re-scoring would move some rooms between tiers.
+- **For C:** `owner.js` checks hiding places only with `looksUnder`; the crouch tests in `tests/ai/owner.test.js` and `tests/levels/levels.test.js` turn it on. `chaseSpeed` is 1.6.
+- **For D:** `contentsOf()` also returns the room's hiding places (`spots`), which the hide mission uses.
+
 ## A camera behind the cat, and calmer controls (Nov 23)
 
 The cat was steered from the fixed overview, and its controls were twitchy: it turned at 3.2 rad/s at once, reached full speed in a tenth of a second and crossed the room in 2 s. Now:

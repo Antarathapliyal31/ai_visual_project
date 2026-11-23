@@ -298,9 +298,11 @@ export function createCat(physics, opts = {}) {
       }
       spin = omega;
     } else {
-      // Ease into and out of a turn, so it doesn't snap round (or swing the chase camera).
+      // Ease into a turn, so it doesn't snap round (or swing the chase camera), and
+      // out of it quicker (turnStop), so it doesn't drift on after the key is let go.
       const want = clamp(input.turn, -1, 1) * cfg.turnRate;
-      const most = (cfg.turnAccel ?? Infinity) * dt;
+      const easing = Math.abs(want) < Math.abs(spin) || want * spin < 0 ? cfg.turnStop ?? cfg.turnAccel : cfg.turnAccel;
+      const most = (easing ?? Infinity) * dt;
       spin += clamp(want - spin, -most, most);
       omega = spin;
       drive = clamp(input.forward, -1, 1);

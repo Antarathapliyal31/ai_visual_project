@@ -51,7 +51,7 @@ describe('missions in words', () => {
     expect(say({ type: 'knock', kind: 'clock', count: 1 })).toBe('Knock over an alarm clock');
     expect(say({ type: 'knock', kind: 'book', count: 5, piece: 'bookshelf' })).toBe('Knock 5 books off the bookshelf');
     expect(say({ type: 'clear', piece: 'nightstand' })).toBe('Clear everything off the nightstand');
-    expect(say({ type: 'hide', spot: 'underBed' })).toBe('Stay under the bed while he looks there');
+    expect(say({ type: 'hide', spot: 'underBed' })).toBe("Stay under the bed while he's right next to it");
     expect(say({ type: 'sneak' })).toMatch(/within a metre of him/);
   });
 });
@@ -123,24 +123,43 @@ describe('following a night', () => {
     expect(t.done).toBe(1);
   });
 
-  it('counts hiding only once he has looked into the spot and got up again without seeing the cat', () => {
+  it('counts hiding once he has been right next to the spot with the cat in it, unseen, and moved off', () => {
     const { level, contents } = room();
     const bed = level.hidingVolumes.find((v) => v.id === 'underBed');
     const under = { x: (bed.min[0] + bed.max[0]) / 2, y: 0.12, z: (bed.min[2] + bed.max[2]) / 2 };
-    const t = createMissionTracker([{ type: 'hide', spot: 'underBed', title: 'Under his nose' }], contents);
-    const frame = (state, catAt = under) => t.frame({ knocked: new Set(), catAt, owner: fakeOwner(state) });
-    frame({ motor: 'crouching', spot: bed });
-    expect(t.done).toBe(0); // still looking
-    frame({ motor: 'walking' });
-    expect(t.done).toBe(1);
+    const beside = { x: under.x, z: bed.max[2] + 0.6 }; // 60 cm off the bed's side
+    const away = { x: 2.5, z: 2.5 };
+    const hide = () => createMissionTracker([{ type: 'hide', spot: 'underBed', title: 'Under his nose' }], contents);
+    const frame = (t, at, { catAt = under, isUp = true, ...state } = {}) =>
+      t.frame({ knocked: new Set(), catAt, owner: fakeOwner({ ...at, ...state }, isUp) });
 
-    const seen = createMissionTracker([{ type: 'hide', spot: 'underBed', title: 'Under his nose' }], contents);
-    seen.frame({ knocked: new Set(), catAt: under, owner: fakeOwner({ motor: 'crouching', spot: bed, seesCat: true }) });
-    seen.frame({ knocked: new Set(), catAt: under, owner: fakeOwner({ motor: 'chasing' }) });
+    const t = hide();
+    frame(t, away);
+    frame(t, away);
+    expect(t.done).toBe(0); // across the room: nothing
+    frame(t, beside);
+    expect(t.done).toBe(0); // right there: not yet
+    frame(t, away);
+    expect(t.done).toBe(1); // and gone again
+
+    const seen = hide();
+    frame(seen, beside, { seesCat: true });
+    frame(seen, away, { motor: 'chasing' });
     expect(seen.done).toBe(0);
+
+    const leftFirst = hide(); // the cat slips out while he is still there
+    frame(leftFirst, beside);
+    frame(leftFirst, beside, { catAt: away });
+    frame(leftFirst, away, { catAt: away });
+    expect(leftFirst.done).toBe(0);
+
+    const inBed = hide(); // lying in his bed is not being up and about
+    frame(inBed, beside, { isUp: false, motor: 'inBed' });
+    frame(inBed, away);
+    expect(inBed.done).toBe(0);
   });
 
-  it('in a real night: he checks under the bed with the cat under it, and the mission is done', () => {
+  it('in a real night: he gets up and walks about by the bed with the cat under it, never looks under it, and the mission is done', () => {
     const level = loadLevel('original');
     const t = freshTuning();
     const physics = createPhysicsWorld({ tuning: t });
@@ -155,13 +174,13 @@ describe('following a night', () => {
     expect(props.all.length).toBeGreaterThan(0);
     noise.meter.raise(0.85);
     owner.hear({ position: { x: -2.0, y: 0.05, z: 0.4 }, loudness: 0.9, heardLoudness: 0.9 });
-    let crouchedAtBed = false;
+    let crouched = false;
     for (let i = 0; i < 45 * 120 && !tracker.done; i++) {
       physics.step();
-      if (owner.state.motor === 'crouching' && owner.state.spot?.id === 'underBed') crouchedAtBed = true;
+      if (owner.state.motor === 'crouching') crouched = true;
       tracker.frame({ knocked: new Set(), catAt: cat.body.position, owner });
     }
-    expect(crouchedAtBed).toBe(true);
+    expect(crouched).toBe(false);
     expect(tracker.done).toBe(1);
     expect(owner.state.caught).toBe(false);
     expect(bed).toBeTruthy();

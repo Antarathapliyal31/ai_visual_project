@@ -140,6 +140,16 @@ describe('cat movement', () => {
     run(0.25);
     expect(cat.heading - before).toBeCloseTo(turnRate * 0.25, 2); // steady now
     expect(cat.body.position.x).toBeCloseTo(0, 4); // turning on the spot
+    // Let go: it stops within turnRate / turnStop, drifting on only turnRate^2 / (2 turnStop).
+    const { turnStop } = tuning.cat;
+    const held = cat.heading;
+    cat.setInput({ turn: 0 });
+    run(turnRate / turnStop + 2 / 120);
+    const drift = cat.heading - held;
+    expect(drift).toBeGreaterThan(0);
+    expect(drift).toBeLessThanOrEqual((turnRate * turnRate) / (2 * turnStop) + 1e-9); // about 4 degrees
+    run(0.2);
+    expect(cat.heading).toBeCloseTo(held + drift, 6); // and stays put
   });
 
   it("keeps the body's yaw equal to the heading, so the mesh needs no special case", () => {
@@ -164,7 +174,9 @@ describe('cat movement', () => {
     expect(cat.heading).toBeCloseTo(-Math.PI / 2, 2);
     expect(cat.body.velocity.z).toBeCloseTo(tuning.cat.speed, 2);
     expect(Math.abs(cat.body.velocity.x)).toBeLessThan(0.01);
-    expect(cat.body.position.z).toBeGreaterThan(-1.5 + 1.5);
+    // A half turn at moveTurnRate, up to speed in speed / groundAccel, then running south.
+    const { speed, moveTurnRate, groundAccel } = tuning.cat;
+    expect(cat.body.position.z).toBeGreaterThan(-1.5 + 0.8 * speed * (1 - Math.PI / moveTurnRate - speed / groundAccel));
     cat.setInput({ move: { x: 0, z: 0 } });
     run(0.2);
     expect(cat.state.speed).toBeLessThan(0.01);
@@ -197,7 +209,7 @@ describe('cat against the room', () => {
     cat.setInput({ forward: 1 });
     run(1.5);
     expect(cat.body.position.z).toBeLessThan(ROOM.maxZ - R + 0.02);
-    expect(cat.body.position.x).toBeGreaterThan(1.0); // kept moving east along the wall
+    expect(cat.body.position.x).toBeGreaterThan(-1.0 + 0.6 * tuning.cat.speed * 1.5); // kept moving east along the wall
   });
 
   it('never leaves the room, whichever way it runs', () => {
@@ -498,7 +510,8 @@ describe('cat and props', () => {
     let maxY = 0;
     run(1, () => { maxY = Math.max(maxY, cat.body.position.y); });
     expect(mug.body.position.z).toBeLessThan(0.5 - 0.8);   // pushed well ahead
-    expect(cat.body.position.z).toBeLessThan(1.5 - 2.0);   // the cat barely slowed
+    const free = tuning.cat.speed * (1 - tuning.cat.speed / (2 * tuning.cat.groundAccel)); // how far it gets in 1 s on open floor
+    expect(cat.body.position.z).toBeLessThan(1.5 - 0.85 * free); // the cat barely slowed
     expect(maxY).toBeLessThan(R + 0.02);
   });
 
