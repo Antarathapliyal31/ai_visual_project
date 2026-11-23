@@ -13,7 +13,7 @@ describe('what the validator tells a designer', () => {
     const r = quick({ pieces: [{ item: 'bed', wall: 'north', at: -2.9 }, { item: 'diningTable', x: 3.2, z: 0, turn: 1 }] });
     const [bed, table] = r.errors.filter((e) => e.code === 'out-of-room').map((e) => e.message);
     expect(bed).toMatch(/"at" must be between -2\.69 and 2\.69/);
-    expect(table).toMatch(/centre must be within x -3\.03\.\.3\.03, z -2\.42\.\.2\.42/);
+    expect(table).toMatch(/centre must be within x -3\.04\.\.3\.04, z -2\.44\.\.2\.44/);
   });
 
   it('says where two overlapping pieces are, and to move the free-standing or smaller one', () => {

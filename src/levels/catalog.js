@@ -18,7 +18,7 @@ export const DESIGNED_LEVELS = [
     name: 'Artist\'s studio',
     blurb: 'An artist\'s studio: a big table in the middle and boxes of supplies.',
     designedBy: 'qwen3.5:9b (a local model, through Ollama), checked by validate.js',
-    difficulty: 3,
+    difficulty: 2,
     pieces: [
       { item: 'bed', wall: 'west', at: 1.2 },
       { item: 'nightstand', wall: 'west', at: 2.6 },
@@ -43,7 +43,7 @@ export const DESIGNED_LEVELS = [
     name: 'Student flat the morning after a dinner party',
     blurb: 'A student flat: wardrobe, desk and dining table cluttered with plates.',
     designedBy: 'qwen3.5:9b (a local model, through Ollama), checked by validate.js',
-    difficulty: 3,
+    difficulty: 2,
     pieces: [
       { item: 'bed', wall: 'west', at: 0.5 },
       { item: 'nightstand', wall: 'south', at: 0.5 },
@@ -112,7 +112,7 @@ export const DESIGNED_LEVELS = [
     name: 'Late-night Kitchen',
     blurb: 'A crowded kitchen-diner with the bed along the east wall and breakable dishware piled high on the desk and dining table.',
     designedBy: 'Gemini (gemini-3.6-flash) through Google\'s Gemini API, checked by validate.js',
-    difficulty: 3,
+    difficulty: 2,
     pieces: [
       { item: 'bed', wall: 'east', at: 1.5 },
       { item: 'nightstand', wall: 'east', at: -0.1 },
@@ -442,7 +442,7 @@ export const DESIGNED_LEVELS = [
     name: 'Minimalist studio',
     blurb: 'A stark white room with vast open floor, where breakable dishware sits far from any safe refuge.',
     designedBy: 'Gemini (gemini-3.6-flash) through Google\'s Gemini API, checked by validate.js',
-    difficulty: 4,
+    difficulty: 3,
     pieces: [
       { item: 'bed', wall: 'east', at: -0.8 },
       { item: 'nightstand', wall: 'east', at: -2 },
@@ -461,7 +461,7 @@ export const DESIGNED_LEVELS = [
     name: 'Open house',
     blurb: 'A spotless flat staged for buyers: the bed faces an empty middle floor from the south wall, leaving a long exposed dash from the far desk and dining table.',
     designedBy: 'Gemini (gemini-4-hydrogen) through Google\'s Gemini API, checked by validate.js',
-    difficulty: 4,
+    difficulty: 3,
     pieces: [
       { item: 'bed', wall: 'south', at: -2.1 },
       { item: 'nightstand', wall: 'south', at: -3.22 },
@@ -484,7 +484,7 @@ export const DESIGNED_LEVELS = [
     name: 'First night',
     blurb: 'Bare floorboards on moving-in day: only the bed, a far desk and dining table, and wide open floor between them.',
     designedBy: 'Gemini (gemini-4-hydrogen) through Google\'s Gemini API, checked by validate.js',
-    difficulty: 4,
+    difficulty: 3,
     pieces: [
       { item: 'bed', wall: 'east', at: 1.5 },
       { item: 'desk', wall: 'north', at: -2 },
@@ -503,7 +503,7 @@ export const DESIGNED_LEVELS = [
     name: 'Converted warehouse',
     blurb: 'An airy loft with wide-open middle floor separating the south-east bed from a far desk and dining table.',
     designedBy: 'Gemini (gemini-4-hydrogen) through Google\'s Gemini API, checked by validate.js',
-    difficulty: 4,
+    difficulty: 3,
     pieces: [
       { item: 'bed', wall: 'east', at: 1.5 },
       { item: 'nightstand', wall: 'east', at: 2.65 },
@@ -523,7 +523,7 @@ export const DESIGNED_LEVELS = [
     name: 'Family lounge',
     blurb: 'A big sofa and armchairs sit round the coffee table, with toy boxes and safe hideouts right beside the dining table while stacked boxes and a wardrobe screen the north-east bed.',
     designedBy: 'Gemini (gemini-4-hydrogen) through Google\'s Gemini API, checked by validate.js',
-    difficulty: 2,
+    difficulty: 1,
     pieces: [
       { item: 'bed', wall: 'east', at: -1.6 },
       { item: 'nightstand', wall: 'east', at: -2.75 },

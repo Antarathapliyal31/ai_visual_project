@@ -12,6 +12,8 @@
 
 import { validateLevel } from './validate.js';
 import { LEVEL_SCHEMA, systemPrompt, designPrompt, feedbackPrompt, parseLevel } from './prompt.js';
+import { MISSIONS_SCHEMA, missionsSystemPrompt, missionsPrompt, missionsFeedback, parseMissions } from './missionPrompt.js';
+import { validateMissions } from '../core/missions.js';
 
 /**
  * A designer is one function: given the instructions, the conversation so far
@@ -78,6 +80,55 @@ export async function generateLevel(opts) {
   return { ok: false, spec, result, rounds, model: served };
 }
 
+/**
+ * A model writes a room's two missions; validateMissions checks them against
+ * what the room holds; the model fixes what can't be done.
+ * @param {object} opts
+ * @param {Designer} opts.ask
+ * @param {object} opts.spec        the room
+ * @param {object} opts.contents    contentsOf() for it
+ * @param {string[]} opts.safeSpots validate.js metrics.safeSpotIds
+ * @param {number} opts.goal        its chaos goal
+ * @param {number} [opts.maxRounds]
+ * @param {(round: object) => void} [opts.onRound]
+ * @returns {Promise<{ok: boolean, missions: object[]|null, rounds: object[], model: string|null}>}
+ */
+export async function generateMissions(opts) {
+  const { ask, spec, contents, safeSpots, goal, maxRounds = 3, onRound } = opts;
+  const system = missionsSystemPrompt();
+  const messages = [{ role: 'user', content: missionsPrompt({ spec, contents, safeSpots, goal }) }];
+  const rounds = [];
+  let served = null;
+  for (let n = 1; n <= maxRounds; n++) {
+    let reply;
+    try {
+      reply = await ask({ system, messages, schema: MISSIONS_SCHEMA });
+    } catch (e) {
+      e.rounds = rounds;
+      throw e;
+    }
+    served = reply.model;
+    if (reply.stop === 'refused') {
+      rounds.push({ n, refused: true, errors: [], stats: reply.stats });
+      onRound?.(rounds.at(-1));
+      return { ok: false, missions: null, rounds, model: served };
+    }
+    let missions = null, errors;
+    try {
+      if (reply.stop === 'truncated') throw new Error('the answer was cut off');
+      missions = parseMissions(reply.text);
+      errors = validateMissions(missions, contents, safeSpots);
+    } catch (e) {
+      errors = [`That answer could not be read as missions (${e.message}).`];
+    }
+    rounds.push({ n, missions, errors, stats: reply.stats });
+    onRound?.(rounds.at(-1));
+    if (!errors.length) return { ok: true, missions, rounds, model: served };
+    messages.push(reply.assistant, { role: 'user', content: missionsFeedback(errors) });
+  }
+  return { ok: false, missions: null, rounds, model: served };
+}
+
 /** An id not taken yet: the model's own, or with -2, -3... after it. */
 export function freeId(id, taken) {
   if (!taken.includes(id)) return id;
@@ -121,6 +172,20 @@ export function setDifficulty(source, id, difficulty) {
     ? block.replace(/\n {4}difficulty: \d+,/, `\n    difficulty: ${difficulty},`)
     : block.replace(/(\n {4}designedBy: .*,)/, `$1\n    difficulty: ${difficulty},`);
   return source.slice(0, start) + next + source.slice(end);
+}
+
+/** src/levels/missions.js, as source: every room's missions and the model that wrote them. */
+export function missionsSource(missions) {
+  const sorted = Object.fromEntries(Object.entries(missions).sort(([a], [b]) => a.localeCompare(b)));
+  return [
+    "// Each room's two missions (see src/core/missions.js for what they can be),",
+    '// written by a language model with `node scripts/generate-level.mjs --missions`',
+    "// and checked against what the room holds. A room missing here gets",
+    '// defaultMissions() in the game. This file is rewritten by the script.',
+    '',
+    `export const MISSIONS = ${JSON.stringify(sorted, null, 2)};`,
+    '',
+  ].join('\n');
 }
 
 /** catalog.js with an entry added at the end of the generated levels. */

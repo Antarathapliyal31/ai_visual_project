@@ -124,7 +124,7 @@ ${inventoryTable()}
 
 The validator also rates every room from 1 (easy) to 5 (hard). A room is harder when:
 - the owner sees much of the floor when he sits up in bed;
-- few hiding places stay hidden when he crouches to look (under the bed, a skirted armchair and an open box facing a wall stay hidden; under the desk and under the dining table do not);
+- few hiding places stay hidden when he crouches to look (under the bed, under the dining table's long cloth, a skirted armchair and an open box facing a wall stay hidden; under the desk does not);
 - there are few hiding places at all;
 - the cat has a long run from the plates and mugs (on the desk and the dining table) to a hiding place he cannot find;
 - his walks from the bed to the hiding places are short.
@@ -149,7 +149,7 @@ export function asExample(spec) {
 export const TARGETS = {
   easy: 'Make it EASY (difficulty 1 or 2): put two or three hiding places he cannot find even when he crouches (skirted armchairs, open boxes facing a wall) right next to the desk or the dining table, keep the hiding places well away from his bed, and let furniture stand between the bed and the open room.',
   medium: 'Make it MEDIUM (difficulty 3): a fair mix, with three to five hiding places, one or two of them safe even when he crouches, a few metres from the plates.',
-  hard: 'Make it HARD (difficulty 4 or 5): only two or three hiding places, mostly ones he finds when he crouches (under the desk, under the dining table); put the desk and the dining table far from the bed and from any other safe hiding place, and leave the middle of the room open so he sees it from bed.',
+  hard: 'Make it HARD (difficulty 4 or 5): only two or three hiding places, mostly the desk (he finds the cat under it when he crouches); leave out the dining table and the armchairs, or put them far from the desk; keep the desk far from the bed and from any other safe hiding place, and leave the middle of the room open so he sees it from bed.',
 };
 
 /**

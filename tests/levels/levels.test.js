@@ -5,6 +5,7 @@ import { createNoise } from '../../src/noise/index.js';
 import { createOwner } from '../../src/ai/index.js';
 import { hidingSpotAt } from '../../src/collision/index.js';
 import { tuning } from '../../src/core/tuning.js';
+import { seesCat } from '../../src/ai/vision.js';
 import { LEVELS, ORIGINAL, EXAMPLE_LEVELS, loadLevel } from '../../src/levels/index.js';
 import { DESIGNED_LEVELS } from '../../src/levels/catalog.js';
 
@@ -102,6 +103,48 @@ describe('playing a designed level', () => {
       expect(s.caught).toHaveLength(0); // the cat was under the bed all along
     });
   }
+
+  it('under the dining table the cat is hidden, from a standing look or a crouch', () => {
+    // The cloth hangs from the top's edge almost to the floor (it once stopped at 30 cm,
+    // and a standing owner saw a cat near the edge through the gap).
+    const party = loadLevel(EXAMPLE_LEVELS.find((l) => l.id === 'dinner-party'));
+    const v = party.hidingVolumes.find((h) => h.id === 'underTable');
+    const c = { x: (v.min[0] + v.max[0]) / 2, z: (v.min[2] + v.max[2]) / 2 };
+    const o = tuning.owner;
+    for (const [dx, dz, heading] of [[0, 0, 0], [1, 0, 0], [-1, 0, Math.PI], [0, 1, Math.PI / 2], [0, -1, -Math.PI / 2], [1, 1, 0.8]]) {
+      const at = [c.x + dx * ((v.max[0] - v.min[0]) / 2 - 0.12), R + 0.001, c.z + dz * ((v.max[2] - v.min[2]) / 2 - 0.12)];
+      const physics = createPhysicsWorld({ room: { boxes: party.boxes, occluders: party.occluders }, guard: false, fracture: false });
+      const cat = createCat(physics, { position: at, heading });
+      for (let i = 0; i < 30; i++) physics.step();
+      const p = cat.body.position;
+      const view = { range: o.visionRange, angle: o.visionAngle };
+      const looking = (eye) => Math.atan2(-(p.z - eye.z), p.x - eye.x);
+      for (let x = -3.3; x <= 3.31; x += 0.2) {
+        for (let z = -2.8; z <= 2.81; z += 0.2) {
+          const eye = { x, y: o.eyeHeight, z };
+          if (Math.hypot(x - p.x, z - p.z) < 0.3) continue;
+          expect(seesCat(physics.raycast, eye, looking(eye), cat, view).seen, `standing at ${x.toFixed(1)}, ${z.toFixed(1)}`).toBe(false);
+        }
+      }
+      for (const ck of v.checks) {
+        const eye = { x: ck[0], y: o.crouchEyeHeight, z: ck[2] };
+        expect(seesCat(physics.raycast, eye, looking(eye), cat, view).seen, `crouched at ${ck[0].toFixed(2)}, ${ck[2].toFixed(2)}`).toBe(false);
+      }
+    }
+  });
+
+  it('he comes to the table, crouches to look under it, and does not catch the cat there', () => {
+    const party = loadLevel(EXAMPLE_LEVELS.find((l) => l.id === 'dinner-party'));
+    const v = party.hidingVolumes.find((h) => h.id === 'underTable');
+    const at = { x: v.max[0] - 0.15, z: (v.min[2] + v.max[2]) / 2 }; // near the edge, not tucked in the middle
+    const s = setup(party, { catAt: [at.x, R + 0.001, at.z] });
+    s.noise.meter.raise(0.85);
+    s.sound(at, 0.9);
+    const checked = new Set();
+    s.run(45, () => { if (s.owner.state.motor === 'crouching') checked.add(s.owner.state.spot.id); });
+    expect(checked.has('underTable')).toBe(true);
+    expect(s.caught).toHaveLength(0);
+  });
 
   it('the cat hides in the new furniture: under the dining table and in an open box', () => {
     const party = loadLevel('dinner-party');

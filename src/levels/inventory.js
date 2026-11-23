@@ -134,19 +134,22 @@ const ITEMS = {
   // --------------------------------------------------------------- new pieces
   diningTable: {
     id: 'diningTable', name: 'Dining table',
-    about: 'Table, 1.1 x 0.9 m, with a short tablecloth, plates and mugs. Under it is a hiding place: hidden from a standing look, but the owner finds the cat if he crouches beside it. Leave 1 m clear in front (the +z side at turn 0).',
+    about: 'Table, 1.1 x 0.9 m, with plates and mugs and a long tablecloth that hangs almost to the floor: under it the cat is hidden, even when the owner crouches to look. Leave 1 m clear in front (the +z side at turn 0).',
     mount: 'floor', maxCount: 1,
     boxes: [
       solid('diningTableTop', [0, 0.74, 0], [0.55, 0.02, 0.45], 'wood'),
       ...[[-0.49, -0.39], [-0.49, 0.39], [0.49, -0.39], [0.49, 0.39]].map(([x, z], i) =>
         solid(`diningTableLeg${i}`, [x, 0.36, z], [0.025, 0.36, 0.025], 'wood')),
     ],
-    // The cloth hangs to 30 cm above the floor: a crouched eye (20 cm) sees under it.
+    // The cloth hangs from the table's top edge to 2 cm above the floor, like the bed
+    // skirt, flush with the top so no sightline slips between them. (At first it stopped
+    // at 30 cm, meant to let a crouched owner see under it; but a standing owner could
+    // then see a cat near the edge from across the room, through that gap.)
     occluders: [
-      occluder('diningClothFront', [0, 0.52, 0.47], [0.57, 0.22, 0.005]),
-      occluder('diningClothBack', [0, 0.52, -0.47], [0.57, 0.22, 0.005]),
-      occluder('diningClothLeft', [-0.57, 0.52, 0], [0.005, 0.22, 0.47]),
-      occluder('diningClothRight', [0.57, 0.52, 0], [0.005, 0.22, 0.47]),
+      occluder('diningClothFront', [0, 0.39, 0.455], [0.56, 0.37, 0.005]),
+      occluder('diningClothBack', [0, 0.39, -0.455], [0.56, 0.37, 0.005]),
+      occluder('diningClothLeft', [-0.555, 0.39, 0], [0.005, 0.37, 0.46]),
+      occluder('diningClothRight', [0.555, 0.39, 0], [0.005, 0.37, 0.46]),
     ],
     hiding: [{ id: 'underTable', min: [-0.5, 0, -0.4], max: [0.5, 0.7, 0.4], checks: [[0, 0, 1.15], [0, 0, -1.15], [1.25, 0, 0], [-1.25, 0, 0]] }],
   },

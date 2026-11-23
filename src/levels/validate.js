@@ -387,6 +387,7 @@ export function validateLevel(spec, opts = {}) {
   // ---------------------------------------------------------- difficulty
   const safeVolumes = level.hidingVolumes.filter((v) => !found.has(v.id));
   metrics.safeSpots = safeVolumes.length;
+  metrics.safeSpotIds = safeVolumes.map((v) => v.id); // for 'hide' missions (src/core/missions.js)
   metrics.runToHide = +runToHide(catFloor, breakables.map((p) => p.body.position), safeVolumes.length ? safeVolumes : level.hidingVolumes).toFixed(2);
   const d = difficultyOf(metrics);
   metrics.difficultyParts = d.parts;

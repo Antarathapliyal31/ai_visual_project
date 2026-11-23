@@ -172,5 +172,7 @@ export const tuning = {
   game: {
     roundSeconds: 180,       // the night: last until dawn
     points: { knocked: 10, broken: 40 },
+    goalShare: 0.25,         // a night's chaos goal: this share of all the chaos its room could make
+    unlock: { medium: 6, hard: 15 }, // stars it takes to open the harder rooms
   },
 };

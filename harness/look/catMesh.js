@@ -52,8 +52,8 @@ function spring(x, v, target, w, dt) {
   return [target + (y + c * dt) * e, (v - w * dt * c) * e];
 }
 
-const BASE = new THREE.Color(0xa67f4f), BACK = new THREE.Color(0x7f5f3b), DARK = new THREE.Color(0x33241a);
-const LIGHT = new THREE.Color(0xf0dfbf), PINK = new THREE.Color(0xd98f8a);
+// The tabby's coat: the default. Other coats (src/core/progress.js COATS) swap these colours.
+const TABBY = { base: 0xa67f4f, back: 0x7f5f3b, dark: 0x33241a, light: 0xf0dfbf, pink: 0xd98f8a, ear: 0x8a6841, sheen: 0xf6dfb4 };
 
 /** 0 at a, 1 at b, eased; works with a > b too. */
 function smooth(a, b, v) {
@@ -83,7 +83,16 @@ function painted(geo, paint) {
   return geo;
 }
 
-export function createCatMesh(dims) {
+/**
+ * @param {{radius: number, halfLength: number}} dims  the cat's collider (createCat().dims)
+ * @param {object} [look]
+ * @param {object} [look.coat]    colours: base, back, dark (stripes), light (chest, belly, socks, muzzle), ear, sheen
+ * @param {{color: number, bell?: boolean}} [look.collar]
+ */
+export function createCatMesh(dims, look = {}) {
+  const tone = { ...TABBY, ...(look.coat ?? {}) };
+  const BASE = new THREE.Color(tone.base), BACK = new THREE.Color(tone.back), DARK = new THREE.Color(tone.dark);
+  const LIGHT = new THREE.Color(tone.light), PINK = new THREE.Color(tone.pink);
   const k = dims.radius / 0.12; // everything below is in metres for a 12 cm radius
   const S = (v) => v * k;
   const P = (x, y, z) => [S(x), S(y), S(z)];
@@ -91,7 +100,7 @@ export function createCatMesh(dims) {
 
   const coat = tex.fur();
   coat.repeat.set(3, 3);
-  const fur = new THREE.MeshPhysicalMaterial({ vertexColors: true, map: coat, bumpMap: coat, bumpScale: 1.4, roughness: 0.92, sheen: 0.8, sheenRoughness: 0.5, sheenColor: 0xf6dfb4 });
+  const fur = new THREE.MeshPhysicalMaterial({ vertexColors: true, map: coat, bumpMap: coat, bumpScale: 1.4, roughness: 0.92, sheen: 0.8, sheenRoughness: 0.5, sheenColor: tone.sheen });
   fur.userData.env = 0.3;
 
   // ------------------------------------------------------------- the coat
@@ -158,7 +167,7 @@ export function createCatMesh(dims) {
   const eyeWhite = new THREE.MeshPhysicalMaterial({ color: 0xb9cf4a, emissive: 0x53701a, emissiveIntensity: 0.45, roughness: 0.15, clearcoat: 1 });
   const black = new THREE.MeshStandardMaterial({ color: 0x0b0907, roughness: 0.3 });
   const earSkin = new THREE.MeshStandardMaterial({ color: 0xd9a39a, roughness: 0.8, side: THREE.DoubleSide });
-  const earFur = new THREE.MeshPhysicalMaterial({ color: 0x8a6841, map: coat, roughness: 0.92, sheen: 0.6, sheenColor: 0xf6dfb4, side: THREE.DoubleSide });
+  const earFur = new THREE.MeshPhysicalMaterial({ color: tone.ear, map: coat, roughness: 0.92, sheen: 0.6, sheenColor: tone.sheen, side: THREE.DoubleSide });
   eyeWhite.userData.env = 1.2;
   const eyes = [], ears = [];
   for (const side of [-1, 1]) {
@@ -206,6 +215,21 @@ export function createCatMesh(dims) {
   whiskerGeo.setAttribute('position', new THREE.Float32BufferAttribute(whiskers, 3));
   head.add(new THREE.LineSegments(whiskerGeo, new THREE.LineBasicMaterial({ color: 0xfaf4e6, transparent: true, opacity: 0.85 })));
   body.add(head);
+
+  // --------------------------------------------------------------- collar
+  // A band round the neck, tilted with it (lower at the throat), and a bell under the chin.
+  if (look.collar?.color != null) {
+    // The neck is 4.4-4.6 cm round here: the band sits a centimetre proud of it, where the neck meets the shoulders.
+    const band = new THREE.Mesh(new THREE.TorusGeometry(S(0.051), S(0.0085), 12, 36), new THREE.MeshStandardMaterial({ color: look.collar.color, roughness: 0.5 }));
+    band.rotation.set(0, Math.PI / 2, 0.42, 'ZYX');
+    band.position.set(...P(0.138, 0.05, 0));
+    body.add(band);
+    if (look.collar.bell) {
+      const bell = new THREE.Mesh(new THREE.SphereGeometry(S(0.012), 16, 12), new THREE.MeshStandardMaterial({ color: 0xe2b44a, roughness: 0.25, metalness: 0.9 }));
+      bell.position.set(...P(0.162, -0.006, 0));
+      body.add(bell);
+    }
+  }
 
   // ----------------------------------------------------------------- legs
   // Each leg hangs from a pivot, so it can swing. Front legs from the shoulders, hind shanks from the thighs.

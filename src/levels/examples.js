@@ -15,7 +15,7 @@ export const EXAMPLE_LEVELS = [
     name: 'Dinner party',
     blurb: 'The bed is under the north wall now, and a dining table with a tablecloth takes the middle of the room.',
     designedBy: BY_HAND,
-    difficulty: 3,
+    difficulty: 2,
     pieces: [
       { item: 'bed', wall: 'north', at: -1.9 },
       { item: 'nightstand', wall: 'north', at: -3.15 },

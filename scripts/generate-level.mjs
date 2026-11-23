@@ -39,6 +39,8 @@
 //                        server-side fallback on, so a declined request is re-run
 //                        on Anthropic's recommended fallback model)
 //   --log DIR            where each run's transcript goes (default docs/level-runs)
+//   --missions           have the model write the two missions of every room that has none
+//                        (add --redo to write them all again); saved in src/levels/missions.js
 //   --rescore            measure every generated room again and update the difficulty
 //                        stored in catalog.js (after the scoring changes); calls no model
 //   --dry-run            print the prompt and the schema; call nothing, write nothing
@@ -50,7 +52,12 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { LEVELS, EXAMPLE_LEVELS, ORIGINAL } from '../src/levels/index.js';
 import { DESIGNED_LEVELS } from '../src/levels/catalog.js';
-import { generateLevel, catalogEntry, addToCatalog, freeId, setDifficulty } from '../src/levels/generate.js';
+import { generateLevel, generateMissions, catalogEntry, addToCatalog, freeId, setDifficulty, missionsSource } from '../src/levels/generate.js';
+import { MISSIONS } from '../src/levels/missions.js';
+import { contentsOf, goalFor, describe as describeMission } from '../src/core/missions.js';
+import { createPhysicsWorld } from '../src/physics/world.js';
+import { tuning } from '../src/core/tuning.js';
+import { loadLevel } from '../src/levels/index.js';
 import { validateLevel } from '../src/levels/validate.js';
 import { tierOf } from '../src/levels/pool.js';
 import { designPrompt, systemPrompt, LEVEL_SCHEMA } from '../src/levels/prompt.js';
@@ -60,14 +67,17 @@ import { geminiDesigner, checkGemini, GEMINI_MODEL, THINKING_LEVELS } from '../s
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CATALOG = `${ROOT}src/levels/catalog.js`;
+const MISSIONS_FILE = `${ROOT}src/levels/missions.js`;
 
 function args(argv) {
-  const o = { count: 1, rounds: null, theme: undefined, difficulty: undefined, rescore: false, model: null, thinking: undefined, think: true, thinkBudget: 8000, host: OLLAMA_HOST, designer: 'gemini', log: `${ROOT}docs/level-runs`, dryRun: false, write: true };
+  const o = { count: 1, rounds: null, theme: undefined, difficulty: undefined, rescore: false, missions: false, redo: false, model: null, thinking: undefined, think: true, thinkBudget: 8000, host: OLLAMA_HOST, designer: 'gemini', log: `${ROOT}docs/level-runs`, dryRun: false, write: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--theme') o.theme = argv[++i];
     else if (a === '--difficulty') o.difficulty = argv[++i];
     else if (a === '--rescore') o.rescore = true;
+    else if (a === '--missions') o.missions = true;
+    else if (a === '--redo') o.redo = true;
     else if (a === '--count') o.count = Math.max(1, Number(argv[++i]) || 1);
     else if (a === '--rounds') o.rounds = Math.max(1, Number(argv[++i]) || 1);
     else if (a === '--model') o.model = argv[++i];
@@ -80,7 +90,7 @@ function args(argv) {
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--no-write') o.write = false;
     else if (a === '--help' || a === '-h') {
-      console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 50).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+      console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 52).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
       process.exit(0);
     } else { console.error(`Unknown option ${a} (try --help)`); process.exit(2); }
   }
@@ -190,6 +200,68 @@ function transcript(outcome, started, spec) {
   return lines.join('\n');
 }
 
+// -------------------------------------------------------------- missions
+const missions = { ...MISSIONS };
+const missionLog = [];
+
+/** Have the model write a room's two missions; saved as soon as they pass. */
+async function writeMissions(spec) {
+  const level = loadLevel(spec);
+  const physics = createPhysicsWorld({ ...(level.legacy ? {} : { room: { boxes: level.boxes, occluders: level.occluders } }), guard: false, fracture: false });
+  level.spawnProps(physics);
+  const contents = contentsOf(level, physics.props);
+  const safeSpots = validateLevel(spec, { settle: false }).metrics.safeSpotIds;
+  const goal = goalFor(contents, tuning);
+  const outcome = await generateMissions({
+    ask, spec, contents, safeSpots, goal,
+    onRound: (r) => {
+      if (r.refused) return console.log(`    round ${r.n}: declined`);
+      if (!r.errors.length) return console.log(`    round ${r.n}: ${r.missions.map((m) => `"${m.title}" (${describeMission(m)})`).join('; ')}`);
+      console.log(`    round ${r.n}: rejected: ${r.errors.join(' ')}`);
+    },
+  });
+  missionLog.push(`## ${spec.name} (${spec.id}): ${outcome.ok ? `written by ${outcome.model}` : 'no missions passed'}`, '');
+  for (const r of outcome.rounds) {
+    missionLog.push(`Round ${r.n}${r.stats ? ` (${r.stats.seconds.toFixed(0)} s)` : ''}:`, '');
+    if (r.missions) for (const m of r.missions) missionLog.push(`- ${m.title}: ${describeMission(m)} \`${JSON.stringify(m)}\``);
+    for (const e of r.errors) missionLog.push(`- rejected: ${e}`);
+    missionLog.push('');
+  }
+  if (outcome.ok) {
+    missions[spec.id] = { by: credit(outcome.model).replace(', checked by validate.js', ''), missions: outcome.missions };
+    writeFileSync(MISSIONS_FILE, missionsSource(missions));
+  }
+  return outcome.ok;
+}
+
+function saveMissionLog(started) {
+  if (!missionLog.length) return null;
+  mkdirSync(opts.log, { recursive: true });
+  const file = `${opts.log}/${started.toISOString().slice(0, 10)}-missions-${started.getTime().toString(36)}.md`;
+  writeFileSync(file, [`# Missions run (${started.toISOString()})`, '', `- Designer: ${opts.designer}, model ${opts.model}`, '', ...missionLog].join('\n'));
+  return file;
+}
+
+if (opts.missions) {
+  const started = new Date();
+  const rooms = [ORIGINAL, ...DESIGNED_LEVELS].filter((spec) => opts.redo || !missions[spec.id]);
+  console.log(`Writing missions for ${rooms.length} room(s) with ${opts.model}`);
+  let written = 0;
+  for (const spec of rooms) {
+    console.log(`  ${spec.name} (${spec.id})`);
+    try {
+      if (await writeMissions(spec)) written++;
+    } catch (e) {
+      if (!/busy or rate-limited/.test(String(e?.message))) throw e;
+      console.error(`${e.message} Missions written before this are saved; run --missions again later for the rest.`);
+      break;
+    }
+  }
+  const file = saveMissionLog(started);
+  console.log(`Missions written for ${written} of ${rooms.length} room(s); src/levels/missions.js is up to date.${file ? ` Transcript: ${file}` : ''}`);
+  process.exit(0);
+}
+
 // ------------------------------------------------------------------ the run
 let added = 0;
 for (let k = 0; k < opts.count; k++) {
@@ -249,6 +321,15 @@ for (let k = 0; k < opts.count; k++) {
     writeFileSync(CATALOG, addToCatalog(readFileSync(CATALOG, 'utf8'), entry));
     made.push(spec); // so the next one differs from it too
     console.log(`Level ${k + 1}: "${spec.name}" (${spec.id}), difficulty ${spec.difficulty} (${tierOf(spec.difficulty)}${opts.difficulty && opts.difficulty !== tierOf(spec.difficulty) ? `; asked for ${opts.difficulty}` : ''}), added to src/levels/catalog.js. Transcript: ${logFile}`);
+    // And its two missions. If the model can't write them now, the game uses defaultMissions() until --missions is run.
+    try {
+      console.log('  its missions:');
+      if (!(await writeMissions(spec))) console.log('  no missions passed; the game will use the default ones');
+    } catch (e) {
+      if (!/busy or rate-limited/.test(String(e?.message))) throw e;
+      console.log(`  ${e.message} The room is saved; run --missions later for its missions.`);
+    }
+    saveMissionLog(started);
   } else {
     console.log(`Level ${k + 1}: "${spec.name}" passed (not written). Transcript: ${logFile}\n${JSON.stringify(spec, null, 2)}`);
   }

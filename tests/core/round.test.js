@@ -72,4 +72,36 @@ describe('round', () => {
     r.toMenu();
     expect(r.state).toBe('menu');
   });
+
+  it('needs the chaos goal to win at dawn: below it the night is only quiet', () => {
+    const r = createRound(t);
+    r.start({ goal: 100 });
+    expect(r.goal).toBe(100);
+    r.tally(5, 0); // 50
+    expect(r.goalReached).toBe(false);
+    r.update(10.5);
+    expect(r.state).toBe('quiet');
+    expect(r.endedBy).toBe('dawn');
+
+    r.start({ goal: 100 });
+    r.tally(4, 2); // 40 + 80
+    expect(r.goalReached).toBe(true);
+    r.update(10.5);
+    expect(r.state).toBe('won');
+    expect(r.endedBy).toBe('dawn');
+  });
+
+  it('is still lost when caught after the goal is reached, and a goal of 0 is the old rule', () => {
+    const r = createRound(t);
+    r.start({ goal: 50 });
+    r.tally(10, 0);
+    r.caught();
+    expect(r.state).toBe('caught');
+    expect(r.endedBy).toBe('caught');
+
+    r.start();
+    expect(r.goal).toBe(0);
+    r.update(10.5);
+    expect(r.state).toBe('won');
+  });
 });
