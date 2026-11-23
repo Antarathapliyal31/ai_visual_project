@@ -10,7 +10,8 @@
   tree) and the round (src/core/round.js), drawn by the render layer in
   harness/look/. Everything that moves is the real simulation from src/;
   nothing here writes to it except the cat's input. The room is one of the
-  levels in src/levels (the original first), picked on the menu.
+  levels in src/levels: the player picks a difficulty on the menu, and the
+  game picks a room of that difficulty they have not played yet.
 
   Serve the repo root over HTTP (ES modules don't load from file://):
     python3 -m http.server 8550
@@ -83,14 +84,21 @@
   .card button.quiet { background:linear-gradient(var(--wood-hi), var(--wood-lo)); font-size:16px; }
   .card button:hover, .card button:focus-visible { border-color:#ffe0a8; outline:none; filter:brightness(1.12); }
   .card .best { font-size:14px; opacity:.9; }
-  /* The rooms to play: the original first, then the ones built from the inventory. */
-  .card .levels { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; }
-  .card .levels button { text-align:left; font-size:15px; padding:8px 12px 9px; background:linear-gradient(var(--wood-hi), var(--wood-lo)); }
-  .card .levels button[aria-pressed="true"] { border-color:#ffe0a8; background:linear-gradient(#b8742e, #7c4618); }
-  .card .levels small { display:block; font-size:11.5px; font-weight:600; opacity:.85; margin-top:3px; }
-  .card .levels .won::after { content:" \2713"; color:#ffe08a; }
-  .card #levelAbout { font-size:14px; }
-  .card #levelAbout small { display:block; font-size:12px; opacity:.75; margin-top:4px; }
+  /* Difficulty, then the room the game picked for it. */
+  .card .tiers { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+  .card .tiers button { font-size:16px; padding:8px 10px 9px; background:linear-gradient(var(--wood-hi), var(--wood-lo)); }
+  .card .tiers button[aria-pressed="true"] { border-color:#ffe0a8; background:linear-gradient(#b8742e, #7c4618); }
+  .card .tiers small { display:block; font-size:11.5px; font-weight:600; opacity:.85; margin-top:3px; }
+  .card .roomCard { display:flex; flex-direction:column; gap:5px; padding:10px 14px 12px; border-radius:10px;
+                    background:rgba(40,18,4,.35); box-shadow:inset 0 0 0 1px rgba(219,165,92,.45); }
+  .card .roomCard .head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .card .roomCard b { font-size:18px; }
+  .card .roomCard .head small { font-size:12px; font-weight:600; opacity:.85; }
+  .card .roomCard p { font-size:14px; }
+  .card .roomCard .by { font-size:12px; opacity:.75; }
+  .card .roomCard .won::after { content:" \2713"; color:#ffe08a; }
+  .card .roomCard .row { margin-top:2px; }
+  .card button.small { font-size:13px; padding:5px 12px 6px; }
   #endTitle.caught { color:#ff9a7a; }
   #endTitle.won { color:#ffe08a; }
 
@@ -145,8 +153,13 @@
       <span><kbd>J</kbd></span><span>swat what's in front of you</span>
       <span><kbd>Esc</kbd></span><span>pause</span>
     </div>
-    <div class="levels" id="levels" role="group" aria-label="Room"></div>
-    <p id="levelAbout"></p>
+    <div class="tiers" id="tiers" role="group" aria-label="Difficulty"></div>
+    <div class="roomCard">
+      <div class="head"><b id="roomName"></b><small id="roomFacts"></small></div>
+      <p id="roomBlurb"></p>
+      <small class="by" id="roomBy"></small>
+      <div class="row"><button class="quiet small" id="shuffleBtn">Another room</button><button class="quiet small" id="originalBtn">The original room</button></div>
+    </div>
     <div class="row"><button id="playBtn">Play</button></div>
     <p class="best" id="bestLine"></p>
   </div>
@@ -212,6 +225,7 @@ import { createCat, inputFromKeys, CAT_KEYS } from '../src/player/index.js';
 import { createNoise } from '../src/noise/index.js';
 import { createOwner } from '../src/ai/index.js';
 import { LEVELS, loadLevel, INVENTORY } from '../src/levels/index.js';
+import { TIERS, tierOf, roomsIn, nextRoom } from '../src/levels/pool.js';
 import { buildRoom } from './look/room.js';
 import { createPropLook } from './look/propMeshes.js';
 import { createCatMesh } from './look/catMesh.js';
@@ -222,13 +236,20 @@ import { softShadow } from './look/textures.js';
 
 const DT = tuning.physics.fixedStep;
 const BEST_KEY = 'loa.bestChaos';
-const LEVEL_KEY = 'loa.level', WON_KEY = 'loa.wonLevels';
+const LEVEL_KEY = 'loa.level', WON_KEY = 'loa.wonLevels', TIER_KEY = 'loa.tier', PLAYED_KEY = 'loa.played';
 const stored = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
 const store = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
 
 // --------------------------------------------------------------- level
-let levelIndex = Math.max(0, LEVELS.findIndex((l) => l.id === stored(LEVEL_KEY, 'original')));
-let level = loadLevel(LEVELS[levelIndex]);
+// The player picks a difficulty; the game picks a room of it they have not played yet.
+const byId = (id) => LEVELS.find((l) => l.id === id);
+const tierOfRoom = (spec) => tierOf(spec.difficulty ?? 3);
+let played = stored(PLAYED_KEY, []);
+let tier = TIERS.some((t) => t.id === stored(TIER_KEY, '')) ? stored(TIER_KEY, '') : 'medium';
+let spec = byId(stored(LEVEL_KEY, ''));
+if (spec) tier = tierOfRoom(spec);
+else spec = nextRoom(tier, LEVELS, played).room ?? LEVELS[0];
+let level = loadLevel(spec);
 const wonLevels = new Set(stored(WON_KEY, []));
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -457,44 +478,76 @@ function show(screen) {
 function bestLine() {
   return round.best > 0 ? `Best chaos so far: ${round.best}` : '';
 }
-// The level picker on the menu: name, hiding places, a tick once survived till dawn.
+// The menu: the three difficulties, and the room picked for the chosen one.
 const hidingCount = (spec) => spec.pieces.reduce((n, p) => n + (INVENTORY[p.item]?.hiding?.length ?? 0), 0);
-function showLevels() {
-  const box = $('levels');
-  box.replaceChildren(...LEVELS.map((spec, i) => {
+function showMenu() {
+  $('tiers').replaceChildren(...TIERS.map((t) => {
+    const rooms = roomsIn(t.id, LEVELS);
+    const won = rooms.filter((r) => wonLevels.has(r.id)).length;
     const b = document.createElement('button');
     b.type = 'button';
-    b.setAttribute('aria-pressed', String(i === levelIndex));
+    b.title = t.blurb;
+    b.setAttribute('aria-pressed', String(t.id === tier));
     const name = document.createElement('span');
-    name.textContent = spec.name;
-    if (wonLevels.has(spec.id)) name.className = 'won';
+    name.textContent = t.name;
     const about = document.createElement('small');
-    about.textContent = `${hidingCount(spec)} hiding places`;
+    about.textContent = `${rooms.length} room${rooms.length === 1 ? '' : 's'}${won ? ` · ${won} survived` : ''}`;
     b.append(name, about);
-    b.onclick = () => { selectLevel(i); $('playBtn').focus(); };
+    b.onclick = () => { selectTier(t.id); $('playBtn').focus(); };
     return b;
   }));
-  const spec = LEVELS[levelIndex];
-  const by = document.createElement('small');
-  by.textContent = `Furniture placed by ${spec.designedBy}.`;
-  $('levelAbout').replaceChildren(document.createTextNode(spec.blurb ?? ''), by);
+  const current = byId(level.id) ?? level.spec;
+  $('roomName').textContent = current.name;
+  $('roomName').className = wonLevels.has(current.id) ? 'won' : '';
+  $('roomFacts').textContent = `difficulty ${current.difficulty ?? '?'} of 5 · ${hidingCount(current)} hiding places`;
+  $('roomBlurb').textContent = current.blurb ?? '';
+  $('roomBy').textContent = `Furniture placed by ${current.designedBy}.`;
+  $('shuffleBtn').hidden = roomsIn(tier, LEVELS).length < 2;
+  $('originalBtn').hidden = level.id === 'original';
 }
-function selectLevel(i) {
-  i = Math.max(0, Math.min(LEVELS.length - 1, i));
-  if (i !== levelIndex) {
-    levelIndex = i;
-    level = loadLevel(LEVELS[i]);
-    store(LEVEL_KEY, level.id);
+/** Play this room next (and draw it). */
+function setRoom(next) {
+  if (next.id !== level.id) {
+    level = loadLevel(next);
     switchRoom();
     newWorld();
   }
-  showLevels();
+  store(LEVEL_KEY, level.id);
+  showMenu();
 }
-function nextLevel() {
-  selectLevel(levelIndex + 1);
+function keepPlayed(list) {
+  played = list;
+  store(PLAYED_KEY, played);
+}
+function selectTier(id) {
+  tier = id;
+  store(TIER_KEY, tier);
+  if (tierOfRoom(byId(level.id) ?? level.spec) === tier) return showMenu();
+  const pick = nextRoom(tier, LEVELS, played);
+  keepPlayed(pick.played);
+  if (pick.room) setRoom(pick.room);
+}
+/** "Another room": a different unplayed room of the same difficulty (skipping one doesn't count as playing it). */
+function anotherRoom() {
+  const pick = nextRoom(tier, LEVELS, [...played, level.id], { not: level.id });
+  keepPlayed(pick.played.filter((id) => id !== level.id));
+  if (pick.room) setRoom(pick.room);
+}
+function originalRoom() {
+  const original = byId('original');
+  tier = tierOfRoom(original);
+  store(TIER_KEY, tier);
+  setRoom(original);
+}
+/** "Next room" after a round: an unplayed room of the same difficulty. */
+function nextRound() {
+  const pick = nextRoom(tier, LEVELS, played, { not: level.id });
+  keepPlayed(pick.played);
+  if (pick.room) setRoom(pick.room);
   play();
 }
 function play() {
+  if (!played.includes(level.id)) keepPlayed([...played, level.id]);
   newWorld();
   round.start();
   keys.clear();
@@ -507,7 +560,7 @@ function toMenu() {
   keys.clear();
   homeCamera();
   $('bestLine').textContent = bestLine();
-  showLevels();
+  showMenu();
   show('menu');
 }
 function pause() {
@@ -525,10 +578,9 @@ function end() {
   const record = round.score > 0 && round.score >= round.best && round.score > (Number(localStorage.getItem(BEST_KEY)) || 0);
   try { localStorage.setItem(BEST_KEY, String(round.best)); } catch {}
   if (won && !wonLevels.has(level.id)) { wonLevels.add(level.id); store(WON_KEY, [...wonLevels]); }
-  const next = won && levelIndex < LEVELS.length - 1;
-  $('nextBtn').hidden = !next;
-  $('nextBtn').textContent = next ? `Next room: ${LEVELS[levelIndex + 1].name}` : 'Next room';
-  $('endRoom').textContent = level.name;
+  const more = roomsIn(tier, LEVELS).length > 1;
+  $('nextBtn').hidden = !more;
+  $('endRoom').textContent = `${level.name} · ${TIERS.find((t) => t.id === tier).name}`;
   $('endTitle').textContent = won ? 'Dawn!' : 'Caught!';
   $('endTitle').className = won ? 'won' : 'caught';
   $('endLine').textContent = won
@@ -540,14 +592,17 @@ function end() {
   $('endTime').textContent = clock(round.elapsed);
   $('endBest').textContent = record ? 'A new best!' : bestLine();
   show('end');
-  if (next) $('nextBtn').focus();
+  // Survived: on to another room. Caught: "Play again" (focused by show) to have another go.
+  if (won && more) $('nextBtn').focus();
 }
 $('playBtn').onclick = play;
 $('resumeBtn').onclick = resume;
 $('restartBtn').onclick = play;
 $('pauseMenuBtn').onclick = toMenu;
 $('againBtn').onclick = play;
-$('nextBtn').onclick = nextLevel;
+$('nextBtn').onclick = nextRound;
+$('shuffleBtn').onclick = () => { anotherRoom(); $('playBtn').focus(); };
+$('originalBtn').onclick = () => { originalRoom(); $('playBtn').focus(); };
 $('endMenuBtn').onclick = toMenu;
 
 // ------------------------------------------------------------------ input
@@ -564,10 +619,14 @@ addEventListener('keydown', (e) => {
     // Enter always takes the screen's main button, wherever focus is; nothing reaches the cat.
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
       e.preventDefault();
-      ({ menu: play, pause: resume, end: $('nextBtn').hidden ? play : nextLevel })[screen]?.();
+      const after = round.state === 'won' && !$('nextBtn').hidden ? nextRound : play;
+      ({ menu: play, pause: resume, end: after })[screen]?.();
     }
-    // Left and right pick the room on the menu.
-    if (screen === 'menu' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) selectLevel(levelIndex + (e.code === 'ArrowRight' ? 1 : -1));
+    // Left and right pick the difficulty on the menu.
+    if (screen === 'menu' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+      const i = TIERS.findIndex((t) => t.id === tier) + (e.code === 'ArrowRight' ? 1 : -1);
+      if (i >= 0 && i < TIERS.length) selectTier(TIERS[i].id);
+    }
     if (e.code === 'KeyN') setNight(!night);
     return;
   }
@@ -710,7 +769,7 @@ ownerLook.setHome(level.legacy ? null : level.home);
 newWorld();
 setNight(false);
 $('bestLine').textContent = bestLine();
-showLevels();
+showMenu();
 show('menu');
 
 // The full lighting is the expensive part. If this machine can't hold it,
@@ -755,8 +814,9 @@ tick();
 window.game = {
   get physics() { return physics; }, get cat() { return cat; }, get owner() { return owner; }, get noise() { return noise; },
   round, keys, camera, controls, renderer, scene,
-  frame, play, toMenu, pause, resume, setNight, homeCamera, selectLevel,
-  get level() { return level; }, get room() { return room; },
+  frame, play, toMenu, pause, resume, setNight, homeCamera, selectTier, anotherRoom, nextRound,
+  setRoom: (id) => setRoom(byId(id)),
+  get level() { return level; }, get room() { return room; }, get tier() { return tier; }, get played() { return played; },
   pipeline,
   render() { controls.update(); pipeline.render(); releaseNow(); },
 };

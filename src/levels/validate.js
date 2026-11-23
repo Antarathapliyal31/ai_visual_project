@@ -96,33 +96,107 @@ function facingHint(level, piece) {
       : 'No turn here faces a wall or a big piece 1.1 to 1.5 m away: move it so one does');
 }
 
-/** Floor cells the cat can walk to from `start` (a flood fill over its footprint). */
-function catReach(level, start, tuning) {
+/**
+ * The floor as the cat walks it: a 10 cm grid of the spots its body fits
+ * at, and how far apart they are on foot.
+ */
+function catGrid(level, tuning) {
   const r = tuning.cat.radius + 0.01;
   const nav = createNavigator({ radius: r, height: 0.26, boxes: level.boxes, waypoints: [] });
   const step = 0.1;
-  const key = (i, j) => `${i},${j}`;
-  const cell = (i, j) => ({ x: ROOM.minX + r + i * step, z: ROOM.minZ + r + j * step });
   const ni = Math.floor((ROOM.maxX - ROOM.minX - 2 * r) / step), nj = Math.floor((ROOM.maxZ - ROOM.minZ - 2 * r) / step);
-  const startI = Math.round((start.x - ROOM.minX - r) / step), startJ = Math.round((start.z - ROOM.minZ - r) / step);
-  const seen = new Set();
-  const free = (i, j) => i >= 0 && j >= 0 && i <= ni && j <= nj && nav.clear(cell(i, j), cell(i, j));
-  if (!free(startI, startJ)) return { ok: false, cells: [] };
-  const queue = [[startI, startJ]];
-  seen.add(key(startI, startJ));
-  const cells = [];
-  while (queue.length) {
-    const [i, j] = queue.pop();
-    cells.push(cell(i, j));
-    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const a = i + di, b = j + dj;
-      if (seen.has(key(a, b)) || !free(a, b)) continue;
-      if (!nav.clear(cell(i, j), cell(a, b))) continue;
-      seen.add(key(a, b));
-      queue.push([a, b]);
+  const key = (i, j) => i * 10000 + j;
+  const cell = (i, j) => ({ x: ROOM.minX + r + i * step, z: ROOM.minZ + r + j * step });
+  const index = (p) => [Math.round((p.x - ROOM.minX - r) / step), Math.round((p.z - ROOM.minZ - r) / step)];
+  const fits = new Map();
+  const free = (i, j) => {
+    if (i < 0 || j < 0 || i > ni || j > nj) return false;
+    const k = key(i, j);
+    if (!fits.has(k)) fits.set(k, nav.clear(cell(i, j), cell(i, j)));
+    return fits.get(k);
+  };
+  /** Steps on foot from the nearest of `sources` to every spot it can reach. */
+  const spread = (sources) => {
+    const dist = new Map(), queue = [];
+    for (const [i, j] of sources) {
+      if (free(i, j) && !dist.has(key(i, j))) { dist.set(key(i, j), 0); queue.push([i, j]); }
     }
-  }
+    for (let h = 0; h < queue.length; h++) {
+      const [i, j] = queue[h], d = dist.get(key(i, j));
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const a = i + di, b = j + dj;
+        if (dist.has(key(a, b)) || !free(a, b) || !nav.clear(cell(i, j), cell(a, b))) continue;
+        dist.set(key(a, b), d + 1);
+        queue.push([a, b]);
+      }
+    }
+    return dist;
+  };
+  /** The grid spots inside a hiding volume. */
+  const inside = (v) => {
+    const out = [];
+    const [i0, j0] = index({ x: v.min[0], z: v.min[2] }), [i1, j1] = index({ x: v.max[0], z: v.max[2] });
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const c = cell(i, j);
+      if (c.x > v.min[0] && c.x < v.max[0] && c.z > v.min[2] && c.z < v.max[2]) out.push([i, j]);
+    }
+    return out;
+  };
+  return { step, key, cell, index, free, spread, inside };
+}
+
+/** Floor the cat can walk to from `start`. */
+function catReach(grid, start) {
+  const [i, j] = grid.index(start);
+  if (!grid.free(i, j)) return { ok: false, cells: [] };
+  const dist = grid.spread([[i, j]]);
+  const cells = [...dist.keys()].map((k) => grid.cell(Math.floor(k / 10000), k % 10000));
   return { ok: true, cells };
+}
+
+/**
+ * How far, on average, the cat runs from the things it breaks to the nearest
+ * hiding place the owner cannot find even when he crouches (any hiding place,
+ * if none is that safe), in metres.
+ */
+function runToHide(grid, breakables, volumes) {
+  if (!breakables.length) return 0;
+  const dist = grid.spread(volumes.flatMap((v) => grid.inside(v)));
+  const runs = breakables.map((p) => {
+    // From the floor just below or beside it, where the cat jumps down.
+    const [i0, j0] = grid.index(p);
+    let best = Infinity;
+    for (let di = -6; di <= 6; di++) {
+      for (let dj = -6; dj <= 6; dj++) {
+        const d = dist.get(grid.key(i0 + di, j0 + dj));
+        if (d !== undefined) best = Math.min(best, (d + Math.hypot(di, dj)) * grid.step);
+      }
+    }
+    return Number.isFinite(best) ? best : 6;
+  });
+  return runs.reduce((s, x) => s + x, 0) / runs.length;
+}
+
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+/**
+ * How hard a room is to play, 1 (easy) to 5 (hard), from what makes the
+ * cat's night hard: the owner seeing much of the room when he sits up in
+ * bed, few hiding places he cannot find even crouching, few hiding places at
+ * all, a long run from the plates and mugs to safety, and short walks for
+ * him to the hiding places. Each part runs 0 (easy) to 1 (hard).
+ */
+export function difficultyOf(m) {
+  const parts = {
+    view: clamp01((m.bedView - 0.1) / 0.25),
+    safe: 1 - clamp01((m.safeSpots - 1) / 3),
+    spots: 1 - clamp01((m.hidingSpots - 2) / 5),
+    run: clamp01((m.runToHide - 1) / 3),
+    walk: 1 - clamp01((m.meanCheckPath - 2) / 3),
+  };
+  const score = 0.2 * parts.view + 0.25 * parts.safe + 0.15 * parts.spots + 0.3 * parts.run + 0.1 * parts.walk;
+  for (const k of Object.keys(parts)) parts[k] = +parts[k].toFixed(2);
+  return { parts, score: +score.toFixed(2), difficulty: 1 + Math.round(score * 4) };
 }
 
 /**
@@ -243,7 +317,8 @@ export function validateLevel(spec, opts = {}) {
 
   // ---------------------------------------------------------------- the cat
   const catAt = { x: level.cat.position[0], z: level.cat.position[2] };
-  const reach = catReach(level, catAt, tuning);
+  const catFloor = catGrid(level, tuning);
+  const reach = catReach(catFloor, catAt);
   if (!reach.ok) {
     const inTheWay = piecesAt(level, catAt, tuning.cat.radius).map((p) => `${describe(p)} ${covers(p)}`);
     fail('cat-start', `The cat starts inside furniture at x ${catAt.x}, z ${catAt.z}${inTheWay.length ? ` (${inTheWay.join('; ')})` : ''}; start it on open floor.`);
@@ -261,7 +336,7 @@ export function validateLevel(spec, opts = {}) {
   const sees = (from, to) => lineOfSight(physics.raycast, from, to, STATIC).visible;
   const standing = grid.map((w) => ({ x: w.x, y: o.eyeHeight, z: w.z }));
   metrics.exposure = {};
-  let crouchFinds = 0;
+  const found = new Set(); // hiding places he finds the cat in when he crouches to look
   for (const v of level.hidingVolumes) {
     const target = { x: (v.min[0] + v.max[0]) / 2, y: 0.12, z: (v.min[2] + v.max[2]) / 2 };
     const near = standing.filter((e) => Math.hypot(e.x - target.x, e.z - target.z) < o.visionRange);
@@ -274,10 +349,10 @@ export function validateLevel(spec, opts = {}) {
     }
     else if (exposure > 0.15) warn('exposed', `The hiding place ${v.id} can be seen from ${Math.round(exposure * 100)}% of the room.`);
     const crouch = { x: v.checkFrom[0], y: o.crouchEyeHeight, z: v.checkFrom[2] };
-    if (sees(crouch, target)) crouchFinds++;
+    if (sees(crouch, target)) found.add(v.id);
   }
   metrics.hidingSpots = level.hidingVolumes.length;
-  metrics.crouchFinds = crouchFinds;
+  metrics.crouchFinds = found.size;
   metrics.meanCheckPath = checkPaths.length ? +(checkPaths.reduce((s, x) => s + x, 0) / checkPaths.length).toFixed(2) : 0;
 
   // How much of the floor he sees from bed when he sits up.
@@ -292,11 +367,13 @@ export function validateLevel(spec, opts = {}) {
   metrics.bedView = sample.length ? +(inView.length / sample.length).toFixed(2) : 0;
 
   // ---------------------------------------------------------------- props
+  // Spawned either way (it is quick): where the breakables are counts for difficulty.
+  const world = createPhysicsWorld({ tuning, room: { boxes: level.boxes, occluders: level.occluders }, ...(opts.settle === false && { guard: false, fracture: false }) });
+  const props = level.spawnProps(world);
+  metrics.props = props.all.length;
+  const breakables = world.props.filter((p) => p.kind === 'plate' || p.kind === 'mug');
+  metrics.breakables = breakables.length;
   if (opts.settle !== false) {
-    const world = createPhysicsWorld({ tuning, room: { boxes: level.boxes, occluders: level.occluders } });
-    const props = level.spawnProps(world);
-    metrics.props = props.all.length;
-    metrics.breakables = world.props.filter((p) => p.kind === 'plate' || p.kind === 'mug').length;
     for (let i = 0; i < 180; i++) world.step();
     const restless = world.props.filter((p) => {
       const b = p.body, v = b.velocity;
@@ -304,13 +381,16 @@ export function validateLevel(spec, opts = {}) {
         || Math.hypot(v.x, v.y, v.z) > 0.3 || !Number.isFinite(b.position.x);
     });
     if (restless.length) fail('props-unstable', `${restless.length} props fell or kept moving after spawning (${[...new Set(restless.map((p) => p.kind))].join(', ')}); a piece's props may be landing on another piece.`);
-    if (metrics.breakables < 4) fail('few-breakables', `Only ${metrics.breakables} plates and mugs to break; include the desk or the dining table.`);
   }
+  if (metrics.breakables < 4) fail('few-breakables', `Only ${metrics.breakables} plates and mugs to break; include the desk or the dining table.`);
 
   // ---------------------------------------------------------- difficulty
-  const spots = Math.min(1, metrics.hidingSpots / 5);
-  const safe = 1 - (metrics.crouchFinds / Math.max(1, metrics.hidingSpots));
-  const score = 0.45 * metrics.bedView + 0.3 * (1 - spots) + 0.25 * (1 - safe);
-  metrics.difficulty = Math.min(5, Math.max(1, 1 + Math.round(score * 5)));
+  const safeVolumes = level.hidingVolumes.filter((v) => !found.has(v.id));
+  metrics.safeSpots = safeVolumes.length;
+  metrics.runToHide = +runToHide(catFloor, breakables.map((p) => p.body.position), safeVolumes.length ? safeVolumes : level.hidingVolumes).toFixed(2);
+  const d = difficultyOf(metrics);
+  metrics.difficultyParts = d.parts;
+  metrics.difficultyScore = d.score;
+  metrics.difficulty = d.difficulty;
   return result();
 }

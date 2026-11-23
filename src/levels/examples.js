@@ -15,6 +15,7 @@ export const EXAMPLE_LEVELS = [
     name: 'Dinner party',
     blurb: 'The bed is under the north wall now, and a dining table with a tablecloth takes the middle of the room.',
     designedBy: BY_HAND,
+    difficulty: 3,
     pieces: [
       { item: 'bed', wall: 'north', at: -1.9 },
       { item: 'nightstand', wall: 'north', at: -3.15 },
@@ -36,6 +37,7 @@ export const EXAMPLE_LEVELS = [
     name: 'Moving day',
     blurb: 'Half unpacked: a wardrobe, stacks of boxes, and open ones a cat can climb into.',
     designedBy: BY_HAND,
+    difficulty: 4,
     pieces: [
       { item: 'bed', wall: 'west', at: 0.9 },
       { item: 'nightstand', wall: 'west', at: -0.4 },
@@ -57,6 +59,7 @@ export const EXAMPLE_LEVELS = [
     name: 'Reading room',
     blurb: 'Two armchairs and the couch round the coffee table, the desk and books along the north wall.',
     designedBy: BY_HAND,
+    difficulty: 3,
     pieces: [
       { item: 'bed', wall: 'east', at: -1.6 },
       { item: 'nightstand', wall: 'east', at: 0.1 },

@@ -36,6 +36,7 @@ export const ORIGINAL = {
   name: 'The original',
   blurb: 'The studio from the alpha: bed, desk, bookshelf and the couch corner.',
   designedBy: 'the team (by hand)',
+  difficulty: 4,
   legacy: true,
   pieces: [
     wall('bed'), wall('nightstand'), wall('wallShelf'), wall('desk'), wall('windowSill'), wall('bookshelf'),

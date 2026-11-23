@@ -65,6 +65,9 @@ describe('the level list', () => {
       expect(r.errors.map((e) => `${e.code}: ${e.message}`)).toEqual([]);
       expect(r.metrics.difficulty).toBeGreaterThanOrEqual(1);
       expect(r.metrics.difficulty).toBeLessThanOrEqual(5);
+      // The game files rooms by the difficulty they store: it must be what they measure
+      // (after changing the scoring: node scripts/generate-level.mjs --rescore).
+      expect(spec.difficulty, `${spec.id} stores difficulty`).toBe(r.metrics.difficulty);
     });
   }
 });

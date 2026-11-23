@@ -120,6 +120,15 @@ ${inventoryTable()}
 10. The props (books, plates, mugs, lamps) settle where each piece puts them; nothing may stand on top of another piece.
 11. At least four plates and mugs to break: include the desk or the dining table.
 
+## How hard a room plays
+
+The validator also rates every room from 1 (easy) to 5 (hard). A room is harder when:
+- the owner sees much of the floor when he sits up in bed;
+- few hiding places stay hidden when he crouches to look (under the bed, a skirted armchair and an open box facing a wall stay hidden; under the desk and under the dining table do not);
+- there are few hiding places at all;
+- the cat has a long run from the plates and mugs (on the desk and the dining table) to a hiding place he cannot find;
+- his walks from the bed to the hiding places are short.
+
 ## Your answer
 
 Answer with the room as JSON in the given schema, and nothing else. Give it a short name of two or three words for the menu (not the theme repeated), and a one-sentence blurb that says what is different about it.`;
@@ -136,18 +145,30 @@ export function asExample(spec) {
   };
 }
 
+// What to aim for, by difficulty.
+export const TARGETS = {
+  easy: 'Make it EASY (difficulty 1 or 2): put two or three hiding places he cannot find even when he crouches (skirted armchairs, open boxes facing a wall) right next to the desk or the dining table, keep the hiding places well away from his bed, and let furniture stand between the bed and the open room.',
+  medium: 'Make it MEDIUM (difficulty 3): a fair mix, with three to five hiding places, one or two of them safe even when he crouches, a few metres from the plates.',
+  hard: 'Make it HARD (difficulty 4 or 5): only two or three hiding places, mostly ones he finds when he crouches (under the desk, under the dining table); put the desk and the dining table far from the bed and from any other safe hiding place, and leave the middle of the room open so he sees it from bed.',
+};
+
 /**
- * The first turn: what to design, and rooms that pass the validator (as
- * examples, and so the new one differs from them).
- * @param {{theme?: string, existing: object[]}} opts
+ * The first turn: what to design, example rooms that pass the validator (in
+ * full, with how hard they rated), and the rooms already made (by name, so
+ * the new one differs from them).
+ * @param {{theme?: string, target?: 'easy'|'medium'|'hard', examples: object[], others?: object[]}} opts
  */
-export function designPrompt({ theme, existing }) {
-  const rooms = existing.map((spec) => `${spec.name}: ${spec.blurb}\n${JSON.stringify(asExample(spec))}`).join('\n\n');
-  return `These rooms pass the validator.
-
-${rooms}
-
-Design a new room${theme ? `: ${theme}` : ''}. Make it play differently from all of them: move the bed, the hiding places and the open floor, not just the decoration.`;
+export function designPrompt({ theme, target, examples, others = [] }) {
+  const rated = (spec) => (spec.difficulty ? ` (difficulty ${spec.difficulty})` : '');
+  const full = examples.map((spec) => `${spec.name}${rated(spec)}: ${spec.blurb}\n${JSON.stringify(asExample(spec))}`).join('\n\n');
+  const lines = [`These rooms pass the validator.`, '', full];
+  if (others.length) {
+    lines.push('', 'These rooms are in the game already; make yours different from them, with a name of its own:');
+    for (const spec of others) lines.push(`- ${spec.name}${rated(spec)}: ${spec.blurb}`);
+  }
+  lines.push('', `Design a new room${theme ? `: ${theme}` : ''}. Move the bed, the hiding places and the open floor, not just the decoration.`);
+  if (target) lines.push(TARGETS[target]);
+  return lines.join('\n');
 }
 
 const f2 = (v) => v.toFixed(2);
