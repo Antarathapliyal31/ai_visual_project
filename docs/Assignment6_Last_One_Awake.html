@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CS 549 Assignment 6: Last One Awake</title>
+<style>
+  @page { size: Letter; margin: 0.45in 0.5in; }
+  * { box-sizing: border-box; }
+  body { font: 9pt/1.3 "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 14.5pt; margin: 0 0 2pt; }
+  h2 { font-size: 11pt; margin: 7pt 0 3pt; padding-bottom: 1.5pt; border-bottom: 0.75pt solid #999; }
+  h3 { font-size: 9.2pt; margin: 5pt 0 1.5pt; }
+  p { margin: 0 0 4pt; }
+  a { color: #0b4f9c; text-decoration: none; }
+  .meta { color: #333; margin-bottom: 4pt; }
+  .links { border: 0.75pt solid #999; padding: 4pt 7pt; margin: 3pt 0 2pt; }
+  .links p { margin: 0 0 1.5pt; }
+  .links p:last-child { margin: 0; }
+  code { font: 8.1pt Menlo, Consolas, monospace; }
+  ul, ol { margin: 0 0 3pt; padding-left: 13pt; }
+  li { margin-bottom: 1.5pt; }
+  figure { float: right; width: 2.85in; margin: 1pt 0 4pt 10pt; }
+  figure img { width: 100%; display: block; border: 0.5pt solid #999; }
+  figcaption { font-size: 7.6pt; color: #333; margin-top: 2pt; line-height: 1.25; }
+  table { border-collapse: collapse; width: 100%; margin: 3pt 0 4pt; font-size: 8.2pt; line-height: 1.25; }
+  th, td { border: 0.5pt solid #999; padding: 2pt 3.5pt; vertical-align: top; text-align: left; }
+  th { background: #eee; }
+  td.wk { white-space: nowrap; font-weight: 600; }
+  table.study { font-size: 7.9pt; }
+  tr.buffer td { background: #f3f3f3; }
+  tr { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+  .who { color: #444; font-weight: 600; }
+  .num { white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<h1>CS 549 · Assignment 6: Feature Complete &amp; Peer Playtesting</h1>
+<p class="meta"><b>Last One Awake</b>, a 3D stealth game about a cat wrecking an apartment at 3 a.m.<br>
+Group: Rushi Patel (leader), Dharm Patel, Antara Thapliyal, Christina Ross · Mentor: Danrui Li · Feature-complete build of Nov 23, 2026 (the feature freeze).<br>
+Pillars: <b>physics &amp; dynamics</b> (first), <b>collision detection</b> and <b>NPC AI</b> (secondary). Three.js + cannon-es in the browser, no engine.</p>
+
+<div class="links">
+  <p><b>Feature-complete build (WebGL, hosted):</b> <a href="https://antarathapliyal31.github.io/ai_visual_project/harness/play.html">https://antarathapliyal31.github.io/ai_visual_project/harness/play.html</a></p>
+  <p><b>Build zip:</b> <a href="https://github.com/Antarathapliyal31/ai_visual_project/archive/refs/heads/Rushi.zip">https://github.com/Antarathapliyal31/ai_visual_project/archive/refs/heads/Rushi.zip</a> · Unzip, run <code>python3 -m http.server 8550</code> in the folder, open <code>localhost:8550/harness/play.html</code>.</p>
+  <p><b>Source code (public):</b> <a href="https://github.com/Antarathapliyal31/ai_visual_project/tree/Rushi">https://github.com/Antarathapliyal31/ai_visual_project</a> (branches <code>Rushi</code> and <code>main</code> hold the same build) · <code>npm install &amp;&amp; npm test</code> runs 428 headless tests.</p>
+</div>
+
+<h2>1. Feature-complete release notes: changes since the Beta (Assignment 5, Nov 11)</h2>
+<figure>
+  <img src="img/a6-room-view.jpg" alt="The feature-complete build: the whole-room view, the owner has spotted the cat">
+  <figcaption>The feature-complete build in its default whole-room view. A crash woke the owner; he has spotted the cat on the rug (his view on the floor reaches it, “!” over his head, “He sees you!” in the HUD). Top left: the room's chaos goal and its two missions.</figcaption>
+</figure>
+<h3>Final feature integrations (built Nov 22–23 to reach the freeze)</h3>
+<ul>
+  <li><b>Rooms designed by AI, sorted by difficulty.</b> A language model lays out each room from a furniture inventory: Gemini for 18 rooms, a local model (Ollama) for 4. Our validator (<code>src/levels/validate.js</code>) checks every layout: nothing overlaps, every hiding place can be reached and is hidden from the open room, and the owner can walk to everything. Failures go back to the model as reasons until the room passes. There are 23 rooms (our original and the models' 22) in Easy (9), Medium (8) and Hard (6), by a measured difficulty; the game picks one the player hasn't played.</li>
+  <li><b>A goal for every night.</b> To win, reach the room's chaos goal (a quarter of the chaos it can make) and survive to dawn; dawn below the goal ends in “A quiet night”. Each room has two missions, written by Gemini and checked against what the room holds (“Break 3 plates from the desk”). Stars (one per won night, one per mission) unlock the Medium and Hard rooms, four cat skins and two collars, all listed on the menu.</li>
+  <li><b>Players and an online leaderboard.</b> Players type a name before playing, and each name keeps its own stars and unlocks. A leaderboard beside the menu ranks players by stars, then by rooms finished, and the end screen shows each player's place. It is shared online through a Supabase table with row-level security; offline, it shows the players on that computer.</li>
+  <li><b>Cameras and controls.</b> The whole-room view (the default) and a third-person camera behind the cat (C). The mouse turns either camera, W&nbsp;A&nbsp;S&nbsp;D move the cat the way the camera faces, and a click swats. M switches to keys only: A and D turn the cat, and the camera swings round behind it. The camera keeps out of walls and furniture, and the walls nearest it are cut away as the room view turns. Movement is calmer: 1.6&nbsp;m/s, Shift to run at 3.0, and turning eased in.</li>
+  <li><b>The owner.</b> A cat that makes it under the bed, a table or the desk is now safe: he looks round where he heard a noise, but never searches under things. He takes the short way round furniture on a 15&nbsp;cm floor grid instead of 12 waypoints; in simulated chases, he ran off from a cat he had just seen in 1 of 113 (was 7). After a crash he is back in bed in 13&nbsp;s (was 20). He fades when he would block the camera, and his walk plays at his real speed.</li>
+  <li><b>Physics to play with.</b> The bookshelf's two lowest shelves have room for the cat. A swat now sends anything jammed against a wall or a shelf's back the open way, so three swats knock 4–7 books out.</li>
+</ul>
+<h3>Bug fixes</h3>
+<ul>
+  <li>The owner's model stood a quarter turn off his heading, so he saw out of his side and walked sideways; he also stood still for about 5&nbsp;s before going back to bed.</li>
+  <li>A standing owner could see the cat under the dining table through a 30&nbsp;cm gap; the missions panel could show the previous room's missions.</li>
+</ul>
+<h3>Cut, and known issues</h3>
+<ul>
+  <li><b>Cut:</b> sound, a could-have in our plan; the game is silent. The Vite build and CI: the hosted build serves the ES modules directly.</li>
+  <li>Room difficulty was measured while the owner still searched under furniture, so rooms play a little easier than their tier. 14 rooms use built-in missions because Gemini's free quota ran out.</li>
+  <li>Not yet run in Firefox or Safari. On a hot fanless laptop, the full look drops to 45–55&nbsp;FPS, and the game lowers its render scale. Sitting up in bed is still shown as kneeling. The leaderboard has no accounts, so a score could be faked.</li>
+</ul>
+
+<h2>2. User study: peer playtesting</h2>
+<p><b>Methodology.</b> On Nov 23–24 we sent five classmates from outside our group the link to the hosted build and a short feedback form. They played on their own computers, without us there, and filled in the form afterwards. We sent only the links, so the menu and the on-screen hints had to teach the controls. The form asked the brief's three interview questions (the most confusing or frustrating moment; how intuitive the controls were, 1–10; glitches or lag, and when), then how the night ended, their setup, the difficulty and four 1–5 ratings. Its last page, written for an observer, asked where they got stuck, the lowest FPS they saw (the game shows it), prompts they missed and glitches; with no one watching, players 3–5 answered it themselves. As the sessions were not observed, we have no think-aloud or silent notes of our own. Players 1 and 2 answered an earlier version of the form, without the written “most confusing” answer, the setup question or the last page (– in the table).</p>
+<p><b>Subject feedback.</b></p>
+<table class="study">
+  <tr><th style="width:3%">#</th><th style="width:10%">Setup</th><th style="width:11%">Night; difficulty</th><th style="width:8%">Controls (1–10)</th><th style="width:25%">Most confusing or frustrating</th><th style="width:26%">Glitches or lag (when)</th><th>Form's last page (their own notes)</th></tr>
+  <tr><td>1</td><td>–</td><td>Caught; about right</td><td>6</td><td>–</td><td>“There were lags” (no time given).</td><td>–</td></tr>
+  <tr><td>2</td><td>–</td><td>Caught; about right</td><td>8</td><td>–</td><td>None.</td><td>–</td></tr>
+  <tr><td>3</td><td>MacBook</td><td>Stopped early; about right</td><td>10</td><td>None (“N/A”).</td><td>After a switch to another tab, Resume didn't restart the game; it was closed and played again, smoothly.</td><td>Glitch: “loading”; not stuck, no missed prompts.</td></tr>
+  <tr><td>4</td><td>Laptop, mouse</td><td>Dawn; much too easy</td><td>7</td><td>A cluttered welcome menu (suggests a first-play tour), and the owner's state (top right) was unclear: explain his states at the start.</td><td>The owner's head spun erratically while he knelt on the bed. Full lighting is “so dark and murky”; plain looks clean.</td><td>Lowest 68 FPS.</td></tr>
+  <tr><td>5</td><td>Chrome, MacBook, trackpad</td><td>Caught; about right</td><td>8</td><td>None: “well balanced”.</td><td>None: “it worked smooth”.</td><td>Lowest 15 FPS (no time given), though they said it ran smoothly; not stuck, no missed prompts, no glitches.</td></tr>
+</table>
+<p><b>Summary.</b> Controls averaged <b>7.8/10</b> (6–10); no written answer named them as a problem. <b>Difficulty:</b> four found it about right; three were caught, one stopped early, and the one who reached dawn found it much too easy. Goal clarity, reading the owner and knocking things over each averaged 4.2/5 (reading the owner went down to 3), and enjoyment 4.4/5. <b>UI confusion</b> was about the owner's states and a busy menu. <b>Performance</b> varied: one player felt lag, another reported a low of 15 FPS on a MacBook while saying it ran smoothly, and a third never dropped below 68. Two <b>bugs</b>: Resume after a tab switch, and the owner's head spinning while he knelt.</p>
+<p><b>Action items for Assignment 7</b>, from this playtest data:</p>
+<ol>
+  <li><b>Fix Resume after a tab switch</b> (player 3): reproduce it with each camera and steering setting, and make Resume carry on the night every time.</li>
+  <li><b>Find the frame-rate drops</b> (player 1's lag; the 15 FPS player 5 reported on a MacBook): log the slowest moments of play and fix the worst. The game already falls back to the plain render below 40 FPS, so a drop to 15 needs a closer look.</li>
+  <li><b>Explain the owner and tidy the menu</b> (player 4; player 3 rated reading the owner 3/5): say what his states mean when a first night starts, and make the menu less crowded.</li>
+  <li><b>Visual fixes</b> (player 4): stop the owner's head spinning while he kneels on the bed, and lighten the full look.</li>
+</ol>
+
+<h2>3. Schedule for the rest of the semester</h2>
+<p><b>Week 12 (Nov 16–22), plan against outcome.</b> <b>Done:</b> difficulty tiers (now measured on each room), the chaos goal and missions, and the round summary. <b>Added:</b> the AI-designed rooms, names and the leaderboard, and the two cameras with mouse control (these landed in Week 13). <b>Cut:</b> sound and the Vite build/CI. The freeze moved one day, from Nov 22 to Nov 23.</p>
+<table>
+  <tr><th style="width:13%">Week</th><th style="width:46%">Engineering</th><th style="width:19%">Assets</th><th>Integration and milestone</th></tr>
+  <tr><td class="wk">13 · Nov 23–29<br>this build</td>
+    <td><b>Done:</b> cameras, the owner's fixes, the bookshelf, names and the leaderboard; the playtests (Nov 23–24). <b>Next:</b> fixes for anything that blocks play. Thanksgiving week, so a light load.</td>
+    <td>Final menu and HUD text, report screenshots.</td>
+    <td>Feature freeze, Nov 23. <code>Rushi</code> and <code>main</code> are one build.</td></tr>
+  <tr class="buffer"><td class="wk">14 · Nov 30–Dec 6<br>Assignment 7</td>
+    <td>Optimization sprint on the four action items. Also: Firefox and Safari; the owner and debris at 200–400 bodies <span class="who">(A)</span>; re-scoring room difficulty; missions for the last 14 rooms. Polish and fixes only, no new features.</td>
+    <td>Demo video.</td>
+    <td>Final submission: README, report and video.</td></tr>
+</table>
+
+</body>
+</html>
